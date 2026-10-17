@@ -17,6 +17,9 @@ export type MixRequest = {
   taste: Taste;
   size: Size;
   vibe: string;
+  /** O que não pode entrar: artistas pelo nome e gêneros da lista. */
+  avoid: { artists: string[]; genres: Genre[] };
+  noExplicit: boolean;
 };
 
 export type MixResult = {
@@ -216,11 +219,21 @@ export async function buildAndCreate(sp: Spotify, req: MixRequest): Promise<MixR
   const pools: Awaited<ReturnType<typeof genrePool>>[] = [];
   for (const [i, choice] of req.genres.entries()) pools.push(await genrePool(sp, choice, genreSlots[i]));
 
+  // Evitar: artista evitado nunca entra. Gênero evitado tira os artistas de referência dele,
+  // menos os que também são de um gênero escolhido ou foram pedidos.
+  const avoidArtists = new Set(req.avoid.artists.map(norm));
+  const keep = new Set([
+    ...req.genres.flatMap((g) => (g.kind === 'base' ? g.genre.seeds.map(norm) : [])),
+    ...wanted.map((w) => norm(w.name)),
+  ]);
+  for (const g of req.avoid.genres) for (const s of g.seeds) if (!keep.has(norm(s))) avoidArtists.add(norm(s));
+  const blocked = (t: STrack) => (req.noExplicit && t.explicit) || t.artists.some((a) => avoidArtists.has(norm(a.name)));
+
   const usedIds = new Set<string>();
   const usedKeys = new Set<string>();
   const take = (t: STrack): boolean => {
     const k = trackKey(t);
-    if (usedIds.has(t.id) || usedKeys.has(k)) return false;
+    if (usedIds.has(t.id) || usedKeys.has(k) || blocked(t)) return false;
     usedIds.add(t.id);
     usedKeys.add(k);
     return true;

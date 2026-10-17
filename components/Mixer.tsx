@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import Poster from './Poster';
-import { CUSTOM_PREFIX, DEFAULT_GENRES, GENRES, genreLabel, parseGenreText } from '@/lib/genres';
+import { CUSTOM_PREFIX, DEFAULT_GENRES, GENRES, findGenre, genreLabel, parseGenreText } from '@/lib/genres';
 import { DEFAULT_SIZE, LIMITS, SIZES, TASTES, estimateCount, sizeById, type Taste } from '@/lib/options';
 import { renderCover, renderPoster } from '@/lib/poster-image';
 import { DEFAULT_THEME, POSTER_THEMES, cssGradient, themeById } from '@/lib/poster-themes';
@@ -19,9 +19,11 @@ const gKey = (id: string) => `g:${id}`;
 const aKey = (name: string) => `a:${name.toLowerCase()}`;
 type Summary = {
   artists: string[];
-  genres: { id: string; label: string }[];
-  track: { name: string; artist: string } | null;
+  genres: { id: string; label: string; share: number }[];
+  tracks: { name: string; artist: string }[];
 };
+/** Quantos gêneros aparecem antes do "+ N gêneros". */
+const GENRES_SHOWN = 10;
 type Created = {
   id: string;
   name: string;
@@ -81,6 +83,12 @@ export default function Mixer() {
   const [addText, setAddText] = useState('');
   const [must, setMust] = useState<string[]>([]);
   const [weights, setWeights] = useState<Record<string, Weight>>({});
+  const [avoid, setAvoid] = useState<string[]>([]);
+  const [avoidText, setAvoidText] = useState('');
+  const [noExplicit, setNoExplicit] = useState(false);
+  const [sumOpen, setSumOpen] = useState(false);
+  const [showAllGenres, setAllGenres] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
   const [mustText, setMustText] = useState('');
   const [me, setMe] = useState<MeState>({ status: 'loading' });
   const [creating, setCreating] = useState(false);
@@ -117,6 +125,8 @@ export default function Mixer() {
       if (Array.isArray(p.must)) setMust(p.must.filter((x): x is string => typeof x === 'string' && !!x.trim()).slice(0, LIMITS.must));
       if (typeof p.vibe === 'string') setVibe(p.vibe.slice(0, LIMITS.vibe));
       setThemeId(themeById(p.theme).id);
+      if (Array.isArray(p.avoid)) setAvoid(p.avoid.filter((x): x is string => typeof x === 'string' && !!x.trim()).slice(0, LIMITS.avoid));
+      setNoExplicit(p.noExplicit === true);
       if (p.weights && typeof p.weights === 'object') {
         const w: Record<string, Weight> = {};
         for (const [k, v] of Object.entries(p.weights as Record<string, unknown>)) if (v === 1 || v === 3) w[k] = v;
@@ -129,8 +139,8 @@ export default function Mixer() {
   }, []);
 
   useEffect(() => {
-    if (hydrated) writeJSON(KEY_PREFS, { sel, custom, taste, size: sizeId, must, vibe, theme: themeId, weights });
-  }, [hydrated, sel, custom, taste, sizeId, must, vibe, themeId, weights]);
+    if (hydrated) writeJSON(KEY_PREFS, { sel, custom, taste, size: sizeId, must, vibe, theme: themeId, weights, avoid, noExplicit });
+  }, [hydrated, sel, custom, taste, sizeId, must, vibe, themeId, weights, avoid, noExplicit]);
 
   useEffect(() => {
     if (hydrated) writeJSON(KEY_HIST, history.slice(0, 30));
@@ -165,7 +175,10 @@ export default function Mixer() {
         name: data?.name ?? null,
         email: data?.email ?? null,
         artists: Array.isArray(data?.artists) ? data.artists : [],
-        summary: data?.summary && Array.isArray(data.summary.artists) && Array.isArray(data.summary.genres) ? data.summary : null,
+        summary:
+          data?.summary && Array.isArray(data.summary.artists) && Array.isArray(data.summary.genres)
+            ? { ...data.summary, tracks: Array.isArray(data.summary.tracks) ? data.summary.tracks : [] }
+            : null,
       });
     } catch {
       setMe({ status: 'error', message: 'Não deu pra falar com o servidor. Confira sua conexão.', relogin: false, name: null, email: null });
@@ -197,7 +210,7 @@ export default function Mixer() {
       : taste === 'novo'
         ? 'Pra descobrir coisa nova'
         : 'Com base no que você ouve';
-  const configKey = JSON.stringify([sel, picked, must, taste, sizeId, vibeText, weights]);
+  const configKey = JSON.stringify([sel, picked, must, taste, sizeId, vibeText, weights, avoid, noExplicit]);
   const stampKey = stamp && stamp.config === configKey ? stamp.key : null;
   const count = estimateCount(sizeObj);
   const theme = themeById(themeId);
@@ -263,6 +276,20 @@ export default function Mixer() {
     setAddText('');
   }
 
+  /** Gêneros ou artistas que não podem entrar. "sertanejo, Anitta" vira um de cada. */
+  function addAvoid(e: FormEvent) {
+    e.preventDefault();
+    const items = avoidText
+      .split(/[,;]/)
+      .map((n) => n.replace(/\s+/g, ' ').trim().slice(0, 60))
+      .filter(Boolean);
+    if (!items.length) return;
+    setAvoid((list) =>
+      [...list, ...items.filter((n) => !list.some((x) => x.toLowerCase() === n.toLowerCase()))].slice(0, LIMITS.avoid),
+    );
+    setAvoidText('');
+  }
+
   /** Artistas digitados que têm que entrar. Aceita vários separados por vírgula. */
   function addMust(e: FormEvent) {
     e.preventDefault();
@@ -297,6 +324,8 @@ export default function Mixer() {
           taste,
           size: sizeId,
           vibe: vibeText,
+          avoid,
+          noExplicit,
         }),
       });
       const data = await res.json().catch(() => null);
@@ -425,6 +454,13 @@ export default function Mixer() {
     ...GENRES.map((g) => ({ id: g.id, label: g.label })),
     ...custom.map((c) => ({ id: CUSTOM_PREFIX + c, label: c })),
   ];
+  // Mostra os mais comuns, os já escolhidos e os digitados; o resto fica atrás do "+ N gêneros".
+  const shownGenres = showAllGenres
+    ? allGenres
+    : allGenres.filter((g, i) => i < GENRES_SHOWN || sel.includes(g.id) || g.id.startsWith(CUSTOM_PREFIX));
+  const hiddenGenres = allGenres.length - shownGenres.length;
+  const activeExtras =
+    Object.keys(weights).length + avoid.length + (noExplicit ? 1 : 0) + (vibeText ? 1 : 0);
 
   return (
     <>
@@ -447,27 +483,73 @@ export default function Mixer() {
       </header>
 
       {me.status === 'ready' && me.summary && me.summary.artists.length > 0 && (
-        <section className="summary" aria-label="Resumo do que você ouve">
-          <p className="sum-kicker">Seu som ultimamente</p>
+        <section className="summary" aria-labelledby="h-sum">
+          <div className="sum-head">
+            <h2 id="h-sum" className="sum-kicker">
+              Seu som ultimamente
+            </h2>
+            <button type="button" className="linkish" aria-expanded={sumOpen} onClick={() => setSumOpen((o) => !o)}>
+              {sumOpen ? 'Ver menos' : 'Ver mais'}
+            </button>
+          </div>
           <p className="sum-line">
-            Você escuta muito <strong>{joinPt(me.summary.artists)}</strong>.
+            Você escuta muito <strong>{joinPt(me.summary.artists.slice(0, 3))}</strong>
+            {me.summary.genres.length > 0 && (
+              <>
+                {' '}
+                e puxa pra <strong>{joinPt(me.summary.genres.slice(0, 3).map((g) => g.label))}</strong>
+              </>
+            )}
+            .
           </p>
-          {me.summary.genres.length > 0 && (
-            <p className="sum-line">
-              Seu gosto puxa pra <strong>{joinPt(me.summary.genres.map((g) => g.label))}</strong>.
-            </p>
-          )}
-          {me.summary.track && (
-            <p className="sum-line soft">
-              Mais tocada nas últimas semanas: <strong>{me.summary.track.name}</strong>, de {me.summary.track.artist}.
-            </p>
+          {sumOpen && (
+            <div className="sum-more">
+              <div>
+                <h3>Seus artistas</h3>
+                <ol className="rank">
+                  {me.summary.artists.map((a) => (
+                    <li key={a}>{a}</li>
+                  ))}
+                </ol>
+              </div>
+              {me.summary.tracks.length > 0 && (
+                <div>
+                  <h3>Mais tocadas nas últimas semanas</h3>
+                  <ol className="rank">
+                    {me.summary.tracks.map((t) => (
+                      <li key={`${t.name}-${t.artist}`}>
+                        <strong>{t.name}</strong>
+                        <span className="rank-sub">{t.artist}</span>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              )}
+              {me.summary.genres.length > 0 && (
+                <div>
+                  <h3>Seus gêneros</h3>
+                  <ul className="bars">
+                    {me.summary.genres.map((g) => (
+                      <li key={g.id}>
+                        <span className="bar-label">{g.label}</span>
+                        <span className="bar-track" aria-hidden="true">
+                          <span className="bar-fill" style={{ width: `${Math.max(4, g.share)}%` }} />
+                        </span>
+                        <span className="bar-value">{g.share}%</span>
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="hint sub">Estimado pelos artistas que você mais ouve.</p>
+                </div>
+              )}
+            </div>
           )}
           {me.summary.genres.length > 0 && (
             <button
               type="button"
               className="btn"
-              onClick={() => setSel(me.summary!.genres.map((g) => g.id))}
-              disabled={me.summary.genres.every((g, i) => sel[i] === g.id) && sel.length === me.summary.genres.length}
+              onClick={() => setSel(me.summary!.genres.slice(0, 3).map((g) => g.id))}
+              disabled={sel.join() === me.summary.genres.slice(0, 3).map((g) => g.id).join()}
             >
               Montar com esses gêneros
             </button>
@@ -484,7 +566,7 @@ export default function Mixer() {
             </h2>
             <p className="hint">Toque em quantos quiser. A ordem dos toques vira a ordem do cartaz.</p>
             <div className="chips" role="group" aria-labelledby="h-genres">
-              {allGenres.map((g) => {
+              {shownGenres.map((g) => {
                 const order = sel.indexOf(g.id);
                 return (
                   <button
@@ -503,16 +585,21 @@ export default function Mixer() {
                   </button>
                 );
               })}
+              {hiddenGenres > 0 && (
+                <button type="button" className="chip more-chip" onClick={() => setAllGenres(true)}>
+                  + {hiddenGenres} gêneros
+                </button>
+              )}
             </div>
             <form className="addrow" onSubmit={addGenre} autoComplete="off">
-              <label className="hint addlabel" htmlFor="add-genre">
-                Ou escreva do seu jeito, tipo “pop com rock pesado, indie e um pouco de lo-fi”.
+              <label className="sr" htmlFor="add-genre">
+                Escrever os gêneros do seu jeito
               </label>
               <input
                 id="add-genre"
                 className="field"
                 maxLength={200}
-                placeholder="pop com rock pesado, indie…"
+                placeholder="Ou escreva: pop com rock pesado, indie…"
                 value={addText}
                 onChange={(e) => setAddText(e.target.value)}
                 enterKeyHint="done"
@@ -523,23 +610,9 @@ export default function Mixer() {
             </form>
           </section>
 
-          <section className="block" aria-labelledby="h-taste">
-            <h2 id="h-taste">
-              <span className="step">2</span>Conhecidas ou novidades
-            </h2>
-            <div className="seg" role="group" aria-labelledby="h-taste">
-              {TASTES.map((t) => (
-                <button key={t.id} type="button" aria-pressed={t.id === taste} onClick={() => setTaste(t.id)}>
-                  {t.label}
-                </button>
-              ))}
-            </div>
-            <p className="hint after">{tasteObj.hint}</p>
-          </section>
-
           <section className="block" aria-labelledby="h-artists">
             <h2 id="h-artists">
-              <span className="step">3</span>Artistas que não podem faltar{' '}
+              <span className="step">2</span>Artistas que não podem faltar{' '}
               {posterArtists.length > 0 ? (
                 <span className="count">
                   {posterArtists.length === 1 ? '1 escolhido' : `${posterArtists.length} escolhidos`}
@@ -548,45 +621,7 @@ export default function Mixer() {
                 <span className="opt">opcional</span>
               )}
             </h2>
-            <p className="hint">Os que você marcar ou escrever entram com certeza, com várias músicas cada.</p>
-            <form className="addrow must-row" onSubmit={addMust} autoComplete="off">
-              <label className="sr" htmlFor="add-must">
-                Artista que tem que ter
-              </label>
-              <input
-                id="add-must"
-                className="field"
-                maxLength={300}
-                placeholder="Qualquer artista: Linkin Park, Pitty…"
-                value={mustText}
-                onChange={(e) => setMustText(e.target.value)}
-                enterKeyHint="done"
-                disabled={must.length >= LIMITS.must}
-              />
-              <button className="ghost" type="submit" disabled={!mustText.trim() || must.length >= LIMITS.must}>
-                Adicionar
-              </button>
-            </form>
-            {must.length > 0 && (
-              <div className="chips must-chips" role="group" aria-label="Artistas que você escreveu">
-                {must.map((m) => (
-                  <button
-                    key={m}
-                    type="button"
-                    className="chip"
-                    aria-pressed="true"
-                    aria-label={`Tirar ${m}`}
-                    onClick={() => setMust((list) => list.filter((x) => x !== m))}
-                  >
-                    {m}
-                    <span className="tick" aria-hidden="true">
-                      ×
-                    </span>
-                  </button>
-                ))}
-              </div>
-            )}
-            <p className="hint sub">Ou toque nos seus mais ouvidos:</p>
+            <p className="hint">Toque nos seus mais ouvidos ou escreva qualquer artista. Eles entram com várias músicas.</p>
             <div aria-live="polite">
               {me.status === 'loading' && <p className="hint">Buscando seus artistas mais ouvidos…</p>}
               {me.status === 'error' && (
@@ -603,11 +638,8 @@ export default function Mixer() {
                   )}
                 </>
               )}
-              {me.status === 'ready' && artists.length === 0 && (
-                <p className="msg">O Spotify ainda não tem seus mais ouvidos.</p>
-              )}
-              {me.status === 'ready' && artists.length > 0 && (
-                <div className="chips" role="group" aria-label="Seus artistas mais ouvidos">
+              {me.status === 'ready' && (artists.length > 0 || must.length > 0) && (
+                <div className="chips" role="group" aria-label="Artistas">
                   {artists.map((a) => (
                     <button
                       key={a.id}
@@ -624,40 +656,61 @@ export default function Mixer() {
                       {a.name}
                     </button>
                   ))}
+                  {must.map((m) => (
+                    <button
+                      key={`must-${m}`}
+                      type="button"
+                      className="chip"
+                      aria-pressed="true"
+                      aria-label={`Tirar ${m}`}
+                      onClick={() => setMust((list) => list.filter((x) => x !== m))}
+                    >
+                      {m}
+                      <span className="tick" aria-hidden="true">
+                        ×
+                      </span>
+                    </button>
+                  ))}
                 </div>
               )}
             </div>
+            <form className="addrow" onSubmit={addMust} autoComplete="off">
+              <label className="sr" htmlFor="add-must">
+                Outro artista que tem que ter
+              </label>
+              <input
+                id="add-must"
+                className="field"
+                maxLength={300}
+                placeholder="Outro artista: Linkin Park, Pitty…"
+                value={mustText}
+                onChange={(e) => setMustText(e.target.value)}
+                enterKeyHint="done"
+                disabled={must.length >= LIMITS.must}
+              />
+              <button className="ghost" type="submit" disabled={!mustText.trim() || must.length >= LIMITS.must}>
+                Adicionar
+              </button>
+            </form>
           </section>
 
-          {dosage.length > 1 && (
-            <section className="block" aria-labelledby="h-dose">
-              <h2 id="h-dose">
-                <span className="step">4</span>Quanto de cada <span className="opt">opcional</span>
-              </h2>
-              <p className="hint">“Muito” aparece umas quatro vezes mais que “Pouco” na playlist.</p>
-              <ul className="dose">
-                {dosage.map((d) => (
-                  <li key={d.key}>
-                    <span className="dose-name">
-                      {d.label}
-                      <span className="dose-kind">{d.kind}</span>
-                    </span>
-                    <span className="seg dose-seg" role="group" aria-label={`Quanto de ${d.label}`}>
-                      {WEIGHTS.map(({ w, label }) => (
-                        <button key={w} type="button" aria-pressed={weightOf(d.key) === w} onClick={() => setWeight(d.key, w)}>
-                          {label}
-                        </button>
-                      ))}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
+          <section className="block" aria-labelledby="h-taste">
+            <h2 id="h-taste">
+              <span className="step">3</span>Conhecidas ou novidades
+            </h2>
+            <div className="seg" role="group" aria-labelledby="h-taste">
+              {TASTES.map((t) => (
+                <button key={t.id} type="button" aria-pressed={t.id === taste} onClick={() => setTaste(t.id)}>
+                  {t.label}
+                </button>
+              ))}
+            </div>
+            <p className="hint after">{tasteObj.hint}</p>
+          </section>
 
           <section className="block" aria-labelledby="h-dur">
             <h2 id="h-dur">
-              <span className="step">5</span>Tamanho
+              <span className="step">4</span>Tamanho
             </h2>
             <div className="chips" role="group" aria-labelledby="h-dur">
               {SIZES.map((s) => (
@@ -680,22 +733,114 @@ export default function Mixer() {
             {count >= 100 && <p className="hint after">Playlists grandes levam uns 20 a 40 segundos pra montar.</p>}
           </section>
 
-          <section className="block" aria-labelledby="h-vibe">
-            <h2 id="h-vibe">
-              <span className="step">6</span>Pra quê? <span className="opt">opcional</span>
-            </h2>
-            <p className="hint">Vira o nome da playlist.</p>
-            <input
-              className="field wide"
-              aria-labelledby="h-vibe"
-              maxLength={LIMITS.vibe}
-              placeholder="festa, treino, viagem de carro…"
-              value={vibe}
-              onChange={(e) => setVibe(e.target.value)}
-              autoComplete="off"
-              enterKeyHint="done"
-            />
-          </section>
+          <details className="block more" open={moreOpen} onToggle={(e) => setMoreOpen(e.currentTarget.open)}>
+            <summary>
+              <span className="more-title">
+                Mais opções
+                {activeExtras > 0 && <span className="count">{activeExtras === 1 ? '1 ativa' : `${activeExtras} ativas`}</span>}
+              </span>
+              <span className="hint more-sub">Quanto de cada, o que evitar e o nome da playlist</span>
+            </summary>
+
+            <div className="sub-block">
+              <h3>Quanto de cada</h3>
+              {dosage.length > 1 ? (
+                <>
+                  <p className="hint">“Muito” aparece umas quatro vezes mais que “Pouco”.</p>
+                  <ul className="dose">
+                    {dosage.map((d) => (
+                      <li key={d.key}>
+                        <span className="dose-name">
+                          {d.label}
+                          <span className="dose-kind">{d.kind}</span>
+                        </span>
+                        <span className="seg dose-seg" role="group" aria-label={`Quanto de ${d.label}`}>
+                          {WEIGHTS.map(({ w, label }) => (
+                            <button
+                              key={w}
+                              type="button"
+                              aria-pressed={weightOf(d.key) === w}
+                              onClick={() => setWeight(d.key, w)}
+                            >
+                              {label}
+                            </button>
+                          ))}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              ) : (
+                <p className="hint">Escolha mais de um gênero ou artista pra ajustar quanto entra de cada.</p>
+              )}
+            </div>
+
+            <div className="sub-block">
+              <h3>Evitar</h3>
+              <p className="hint">Gêneros ou artistas que não podem entrar de jeito nenhum.</p>
+              {avoid.length > 0 && (
+                <div className="chips must-chips" role="group" aria-label="Evitando">
+                  {avoid.map((a) => {
+                    const g = findGenre(a);
+                    return (
+                      <button
+                        key={a}
+                        type="button"
+                        className="chip avoid-chip"
+                        aria-label={`Parar de evitar ${a}`}
+                        onClick={() => setAvoid((list) => list.filter((x) => x !== a))}
+                      >
+                        <span className="tick" aria-hidden="true">
+                          ✕
+                        </span>
+                        <span className="avoid-name">{g ? g.label : a}</span>
+                        <span className="dose-kind">{g ? 'gênero' : 'artista'}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              <form className="addrow must-row" onSubmit={addAvoid} autoComplete="off">
+                <label className="sr" htmlFor="add-avoid">
+                  Gênero ou artista pra evitar
+                </label>
+                <input
+                  id="add-avoid"
+                  className="field"
+                  maxLength={300}
+                  placeholder="sertanejo, Anitta…"
+                  value={avoidText}
+                  onChange={(e) => setAvoidText(e.target.value)}
+                  enterKeyHint="done"
+                  disabled={avoid.length >= LIMITS.avoid}
+                />
+                <button className="ghost" type="submit" disabled={!avoidText.trim() || avoid.length >= LIMITS.avoid}>
+                  Evitar
+                </button>
+              </form>
+              <label className="check">
+                <input type="checkbox" checked={noExplicit} onChange={(e) => setNoExplicit(e.target.checked)} />
+                Evitar músicas explícitas (com palavrão)
+              </label>
+            </div>
+
+            <div className="sub-block">
+              <h3>
+                <label htmlFor="vibe">Pra quê?</label>
+              </h3>
+              <p className="hint">Vira o nome da playlist.</p>
+              <input
+                id="vibe"
+                className="field wide"
+                maxLength={LIMITS.vibe}
+                placeholder="festa, treino, viagem de carro…"
+                value={vibe}
+                onChange={(e) => setVibe(e.target.value)}
+                autoComplete="off"
+                enterKeyHint="done"
+              />
+            </div>
+          </details>
         </div>
 
         <aside className="stage" aria-label="Prévia e criação">

@@ -1,4 +1,4 @@
-import { CUSTOM_PREFIX, genreById } from './genres';
+import { CUSTOM_PREFIX, findGenre, genreById } from './genres';
 import type { GenreChoice, MixRequest, Weight } from './mix';
 import { LIMITS, TASTES, sizeById, type Taste } from './options';
 import { clean, norm } from './text';
@@ -55,5 +55,18 @@ export function parseMixRequest(body: unknown): MixRequest | string {
   const size = sizeById(b.size);
   const vibe = typeof b.vibe === 'string' ? clean(b.vibe, LIMITS.vibe) : '';
 
-  return { genres, picked, must, taste, size, vibe };
+  // Evitar: cada item vira gênero (se estiver na lista) ou artista.
+  const avoid: MixRequest['avoid'] = { artists: [], genres: [] };
+  for (const raw of Array.isArray(b.avoid) ? b.avoid.slice(0, LIMITS.avoid) : []) {
+    if (typeof raw !== 'string') continue;
+    const name = clean(raw, 60);
+    if (!name) continue;
+    const g = findGenre(name);
+    if (g) {
+      if (!avoid.genres.includes(g) && !genres.some((c) => c.kind === 'base' && c.genre.id === g.id)) avoid.genres.push(g);
+    } else if (!avoid.artists.some((a) => norm(a) === norm(name))) avoid.artists.push(name);
+  }
+  const noExplicit = b.noExplicit === true;
+
+  return { genres, picked, must, taste, size, vibe, avoid, noExplicit };
 }

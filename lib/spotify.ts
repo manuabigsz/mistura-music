@@ -43,7 +43,7 @@ export const MESSAGES = {
 };
 
 export type SArtist = { id: string; name: string };
-export type STrack = { id: string; uri: string; name: string; duration_ms: number; artists: SArtist[] };
+export type STrack = { id: string; uri: string; name: string; duration_ms: number; explicit: boolean; artists: SArtist[] };
 type Query = Record<string, string | number | undefined>;
 type TimeRange = 'short_term' | 'medium_term' | 'long_term';
 
@@ -65,6 +65,7 @@ function asTrack(x: unknown): STrack | null {
     uri: t.uri,
     name: t.name,
     duration_ms: typeof t.duration_ms === 'number' ? t.duration_ms : 0,
+    explicit: t.explicit === true,
     artists,
   };
 }

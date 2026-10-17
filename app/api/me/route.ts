@@ -16,10 +16,11 @@ function guessGenres(artists: SArtist[], tracks: STrack[]) {
   };
   artists.forEach((a, i) => add(a.name, artists.length - i + 2));
   for (const t of tracks) for (const a of t.artists) add(a.name, 1);
+  const total = [...score.values()].reduce((s, n) => s + n, 0) || 1;
   return [...score.entries()]
     .sort((a, b) => b[1] - a[1])
-    .slice(0, 3)
-    .map(([id]) => ({ id, label: GENRES.find((g) => g.id === id)!.label }));
+    .slice(0, 6)
+    .map(([id, n]) => ({ id, label: GENRES.find((g) => g.id === id)!.label, share: Math.round((n / total) * 100) }));
 }
 
 /** Nome da pessoa, os artistas mais ouvidos e um resuminho do que ela anda ouvindo. */
@@ -42,11 +43,10 @@ export async function GET(req: NextRequest) {
       artists = artists.concat(recent.filter((a) => !ids.has(a.id))).slice(0, 12);
     }
     const tracks = await recentTop;
-    const top = tracks[0];
     const summary = {
-      artists: artists.slice(0, 3).map((a) => a.name),
+      artists: artists.slice(0, 8).map((a) => a.name),
       genres: guessGenres(artists, tracks),
-      track: top ? { name: top.name, artist: top.artists.map((a) => a.name).join(', ') } : null,
+      tracks: tracks.slice(0, 5).map((t) => ({ name: t.name, artist: t.artists.map((a) => a.name).join(', ') })),
     };
     return sp.persist(NextResponse.json({ name: me.name, email: me.email, artists, summary }));
   } catch (e) {

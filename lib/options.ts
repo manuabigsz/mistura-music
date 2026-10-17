@@ -54,6 +54,8 @@ export const LIMITS = {
   picked: 8,
   /** Artistas digitados que têm que entrar. */
   must: 10,
+  /** Itens na lista de evitar. */
+  avoid: 15,
   vibe: 60,
 };
 
