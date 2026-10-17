@@ -18,8 +18,8 @@ type Created = {
 };
 type MeState =
   | { status: 'loading' }
-  | { status: 'ready'; name: string | null; artists: Artist[] }
-  | { status: 'error'; message: string; relogin: boolean };
+  | { status: 'ready'; name: string | null; email: string | null; artists: Artist[] }
+  | { status: 'error'; message: string; relogin: boolean; name: string | null; email: string | null };
 type Notice = { text: string; relogin?: boolean; url?: string | null } | null;
 
 const KEY_PREFS = 'mistura:prefs:v1';
@@ -102,12 +102,14 @@ export default function Mixer() {
           status: 'error',
           message: data?.message ?? 'Não deu pra carregar seus artistas.',
           relogin: res.status === 401,
+          name: data?.name ?? null,
+          email: data?.email ?? null,
         });
         return;
       }
-      setMe({ status: 'ready', name: data?.name ?? null, artists: Array.isArray(data?.artists) ? data.artists : [] });
+      setMe({ status: 'ready', name: data?.name ?? null, email: data?.email ?? null, artists: Array.isArray(data?.artists) ? data.artists : [] });
     } catch {
-      setMe({ status: 'error', message: 'Não deu pra falar com o servidor. Confira sua conexão.', relogin: false });
+      setMe({ status: 'error', message: 'Não deu pra falar com o servidor. Confira sua conexão.', relogin: false, name: null, email: null });
     }
   }, []);
 
@@ -223,7 +225,12 @@ export default function Mixer() {
           <p className="lede">Monte uma playlist no Spotify a partir do que você já ouve, com os gêneros que quiser.</p>
         </div>
         <form className="account" action="/api/auth/logout" method="post">
-          {me.status === 'ready' && me.name && <span>Conectado como {me.name}</span>}
+          {me.status !== 'loading' && (me.name || me.email) && (
+            <span>
+              Conectado como {me.name ?? me.email}
+              {me.name && me.email && ` (${me.email})`}
+            </span>
+          )}
           <button type="submit" className="linkish">
             Sair
           </button>

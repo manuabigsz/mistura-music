@@ -163,7 +163,12 @@ export class Spotify {
       }
       throw new SpotifyError('rate_limited', MESSAGES.rate, { retryAfter: wait });
     }
-    if (res.status === 403) throw new SpotifyError('forbidden', MESSAGES.forbidden);
+    if (res.status === 403) {
+      const body = await res.text().catch(() => '');
+      console.error(`[spotify] 403 em ${method} ${path}:`, body);
+      const hint = process.env.NODE_ENV === 'development' ? ` [${method} ${path}: ${body.slice(0, 300)}]` : '';
+      throw new SpotifyError('forbidden', MESSAGES.forbidden + hint, { path });
+    }
     if (res.status === 400) throw new SpotifyError('bad_request', MESSAGES.generic);
     if (res.status >= 500 && method === 'GET' && attempt === 0) {
       await sleep(400 + Math.random() * 400);
@@ -190,9 +195,9 @@ export class Spotify {
     }
   }
 
-  async me(): Promise<{ id: string; name: string | null }> {
-    const r = await this.call<{ id?: string; display_name?: string | null }>('GET', '/me');
-    return { id: r?.id ?? '', name: r?.display_name ?? null };
+  async me(): Promise<{ id: string; name: string | null; email: string | null }> {
+    const r = await this.call<{ id?: string; display_name?: string | null; email?: string | null }>('GET', '/me');
+    return { id: r?.id ?? '', name: r?.display_name ?? null, email: r?.email ?? null };
   }
 
   async topArtists(range: TimeRange = 'medium_term', limit = 12): Promise<SArtist[]> {
@@ -226,7 +231,8 @@ export class Spotify {
     try {
       r = await run('from_token');
     } catch (e) {
-      if (!(e instanceof SpotifyError && e.code === 'bad_request')) throw e;
+      // `from_token` pede o país da conta; sem essa permissão o Spotify devolve 400 ou 403.
+      if (!(e instanceof SpotifyError && (e.code === 'bad_request' || e.code === 'forbidden'))) throw e;
       r = await run();
     }
     return tracksOf(r?.tracks?.items);

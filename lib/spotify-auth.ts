@@ -5,6 +5,7 @@ const ACCOUNTS = 'https://accounts.spotify.com';
 
 /** Só o necessário: mais ouvidos, tocadas recentemente e criar playlists. */
 export const SCOPES = [
+  'user-read-email',
   'user-top-read',
   'user-read-recently-played',
   'playlist-modify-private',
