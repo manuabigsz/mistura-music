@@ -286,24 +286,6 @@ export default function Mixer() {
     );
   }
 
-  /** Só o link, com texto: é o que aparece com prévia no WhatsApp. */
-  async function shareLink() {
-    if (!last?.url) return;
-    if (navigator.share) {
-      try {
-        await navigator.share({ title: last.name, text: shareText(last), url: last.url });
-      } catch (e) {
-        if ((e as Error)?.name !== 'AbortError') setShareMsg(`Não deu pra compartilhar. O link é ${last.url}`);
-      }
-      return;
-    }
-    try {
-      await navigator.clipboard.writeText(shareText(last));
-      setShareMsg('Link copiado com uma mensagem pronta.');
-    } catch {
-      setShareMsg(`Não deu pra copiar. O link é ${last.url}`);
-    }
-  }
 
   function removeFromList(id: string) {
     setHistory((h) => h.filter((x) => x.id !== id));
@@ -350,6 +332,7 @@ export default function Mixer() {
           <section className="block" aria-labelledby="h-genres">
             <h2 id="h-genres">
               <span className="step">1</span>Gêneros
+              {sel.length > 0 && <span className="count">{sel.length === 1 ? '1 escolhido' : `${sel.length} escolhidos`}</span>}
             </h2>
             <p className="hint">Toque em quantos quiser. A ordem dos toques vira a ordem do cartaz.</p>
             <div className="chips" role="group" aria-labelledby="h-genres">
@@ -408,7 +391,14 @@ export default function Mixer() {
 
           <section className="block" aria-labelledby="h-artists">
             <h2 id="h-artists">
-              <span className="step">3</span>Artistas que não podem faltar <span className="opt">opcional</span>
+              <span className="step">3</span>Artistas que não podem faltar{' '}
+              {pickedArtists.length > 0 ? (
+                <span className="count">
+                  {pickedArtists.length === 1 ? '1 escolhido' : `${pickedArtists.length} escolhidos`}
+                </span>
+              ) : (
+                <span className="opt">opcional</span>
+              )}
             </h2>
             <p className="hint">Seus mais ouvidos. Os que você marcar entram com certeza, mesmo fora dos gêneros.</p>
             <div aria-live="polite">
@@ -440,6 +430,11 @@ export default function Mixer() {
                       aria-pressed={picked.includes(a.id)}
                       onClick={() => toggleArtist(a.id)}
                     >
+                      {picked.includes(a.id) && (
+                        <span className="tick" aria-hidden="true">
+                          ✓
+                        </span>
+                      )}
                       {a.name}
                     </button>
                   ))}
@@ -517,13 +512,8 @@ export default function Mixer() {
                   </a>
                 )}
                 <button type="button" className="btn" onClick={sharePoster} disabled={!shareFile}>
-                  {!shareFile ? 'Preparando cartaz…' : canShareFile ? 'Compartilhar cartaz' : 'Baixar cartaz'}
+                  {shareFile ? 'Compartilhar' : 'Preparando…'}
                 </button>
-                {last.url && (
-                  <button type="button" className="btn" onClick={shareLink}>
-                    Enviar link
-                  </button>
-                )}
               </div>
               {shareMsg && <p className="meta share-msg">{shareMsg}</p>}
             </div>
