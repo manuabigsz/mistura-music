@@ -70,6 +70,16 @@ body {
   white-space: nowrap;
 }
 
+/* Toque direto no celular: sem o atraso de zoom por toque duplo nem o flash cinza. */
+:where(button, a, input, label) {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+:where(button):disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
 :where(button, input, a, summary):focus-visible {
   outline: 3px solid var(--hot);
   outline-offset: 3px;
@@ -106,6 +116,15 @@ body {
   font-size: 14px;
   color: var(--soft);
 }
+.who {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.3;
+}
+.who .email {
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
 
 /* Estrutura */
 .layout {
@@ -121,13 +140,58 @@ body {
   position: sticky;
   top: calc(env(safe-area-inset-top, 0px) + 20px);
 }
+.history {
+  grid-column: 1;
+}
 @media (max-width: 860px) {
   .layout {
     grid-template-columns: minmax(0, 1fr);
     gap: 28px;
+    padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px));
   }
   .stage {
     position: static;
+  }
+}
+
+/* Barra fixa do celular: leva até a prévia e o botão de criar. */
+.dock {
+  display: none;
+}
+@media (max-width: 860px) {
+  .dock {
+    position: fixed;
+    z-index: 20;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px calc(10px + env(safe-area-inset-bottom, 0px));
+    background: var(--page);
+    border-top: 2px solid var(--line);
+  }
+  .dock-sum {
+    flex: 1;
+    min-width: 0;
+    font-size: 14px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .dock-go {
+    font-family: var(--display);
+    font-weight: 800;
+    font-size: 20px;
+    line-height: 1;
+    background: var(--ink);
+    color: var(--page);
+    border: 0;
+    padding: 12px 18px 14px;
+    min-height: 46px;
+    cursor: pointer;
   }
 }
 
@@ -151,6 +215,33 @@ body {
   font-weight: 700;
   line-height: 1.3;
   margin: 0 0 4px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+.step {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--ink);
+  color: var(--page);
+  font-size: 15px;
+  font-weight: 700;
+  flex: none;
+}
+.opt {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--soft);
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  padding: 0 8px;
+}
+.hint.after {
+  margin: 10px 0 0;
 }
 .hint {
   margin: 0 0 14px;
@@ -179,6 +270,22 @@ body {
 .chip[aria-pressed='true'] {
   background: var(--on);
   color: var(--on-ink);
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.ord {
+  display: inline-grid;
+  place-items: center;
+  min-width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--hot);
+  color: #000;
+  font-size: 12px;
+  font-weight: 700;
 }
 .addrow {
   display: flex;
@@ -472,6 +579,9 @@ body {
 .btn.solid {
   background: var(--ink);
   color: var(--page);
+}
+.share-msg {
+  margin: 10px 0 0;
 }
 
 /* Histórico */

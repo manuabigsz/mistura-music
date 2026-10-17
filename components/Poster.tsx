@@ -7,12 +7,14 @@ type Props = {
   genres: string[];
   artists: string[];
   foot: string[];
+  /** Linha abaixo dos gêneros, ex.: "Com base no que você ouve". */
+  base: string;
   /** Muda a cada playlist criada; enquanto existir, o carimbo aparece. */
   stampKey?: string | null;
 };
 
 /** Cartaz estilo lambe-lambe: cada gênero ocupa a largura toda da linha. */
-export default function Poster({ genres, artists, foot, stampKey }: Props) {
+export default function Poster({ genres, artists, foot, base, stampKey }: Props) {
   const billRef = useRef<HTMLDivElement>(null);
   const big = genres.slice(0, 5);
   const rest = genres.slice(5);
@@ -58,7 +60,7 @@ export default function Poster({ genres, artists, foot, stampKey }: Props) {
       <hr className="p-rule" />
       {artists.length > 0 ? (
         <>
-          <p className="p-base has-names">Com base no que você ouve, sem faltar</p>
+          <p className="p-base has-names">{base}</p>
           <p className="p-artists">
             {artists.map((a) => (
               <span key={a}>{a}</span>
@@ -66,7 +68,7 @@ export default function Poster({ genres, artists, foot, stampKey }: Props) {
           </p>
         </>
       ) : (
-        <p className="p-base">Com base no que você ouve</p>
+        <p className="p-base">{base}</p>
       )}
       <div className="p-foot">
         {foot.map((f) => (

@@ -1,16 +1,34 @@
 export type Taste = 'familiar' | 'equilibrado' | 'novo';
 
-export const TASTES: { id: Taste; label: string; poster: string }[] = [
-  { id: 'familiar', label: 'Mais do que eu curto', poster: 'Mais do que você curte' },
-  { id: 'equilibrado', label: 'Equilibrado', poster: '' },
-  { id: 'novo', label: 'Mais descobertas', poster: 'Mais descobertas' },
+export const TASTES: { id: Taste; label: string; poster: string; hint: string }[] = [
+  {
+    id: 'familiar',
+    label: 'Mais do que eu curto',
+    poster: 'Mais do que você curte',
+    hint: 'Puxa bastante das músicas que você já ouve, desde que sejam dos gêneros escolhidos.',
+  },
+  {
+    id: 'equilibrado',
+    label: 'Equilibrado',
+    poster: '',
+    hint: 'Um pouco do que você já ouve nesses gêneros e o resto de novidades.',
+  },
+  {
+    id: 'novo',
+    label: 'Só descobertas',
+    poster: 'Só descobertas',
+    hint: 'Nada do que você costuma ouvir. Só entram os artistas que você marcar acima.',
+  },
 ];
 
-/** Parte da playlist que vem do que a pessoa já ouve. O resto vem dos gêneros. */
+/**
+ * Parte da playlist que vem do que a pessoa já ouve, sempre filtrado pelos gêneros escolhidos.
+ * O resto vem dos gêneros.
+ */
 export const FAMILIAR_SHARE: Record<Taste, number> = {
   familiar: 0.6,
-  equilibrado: 0.35,
-  novo: 0.15,
+  equilibrado: 0.3,
+  novo: 0,
 };
 
 export const DURATIONS: { min: number; label: string; poster: string }[] = [

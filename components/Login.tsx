@@ -35,7 +35,7 @@ export default function Login({ erro }: { erro?: string }) {
           </p>
         </section>
         <aside className="stage">
-          <Poster genres={['Funk', 'Pop', 'Rock', 'Flashback']} artists={[]} foot={['Cerca de 40 músicas', 'Pra festa']} />
+          <Poster genres={['Funk', 'Pop', 'Rock', 'Flashback']} artists={[]} foot={['Cerca de 40 músicas', 'Pra festa']} base="Com base no que você ouve" />
         </aside>
       </main>
     </>

@@ -155,18 +155,21 @@ export async function buildAndCreate(sp: Spotify, req: MixRequest): Promise<MixR
     return true;
   };
 
-  const familiarAll = [...fam.picked, ...fam.top];
+  // Do seu som só entra o que combina com os gêneros escolhidos (ou artistas que você marcou):
+  // escolher só funk não pode trazer o pop que você ouve.
+  const genreArtists = new Set(pools.flatMap((p) => [...p.artistKeys]));
+  const fitsGenres = (t: STrack) => t.artists.some((a) => genreArtists.has(norm(a.name)));
+  const familiarAll = [...fam.picked, ...fam.top.filter(fitsGenres)];
 
-  // Cada gênero: primeiro músicas suas de artistas daquele gênero, depois descobertas.
-  const genreCandidates = pools.map((pool) => {
-    const mine =
-      req.taste === 'novo' ? [] : familiarAll.filter((t) => t.artists.some((a) => pool.artistKeys.has(norm(a.name))));
-    return [...shuffle(mine).slice(0, Math.ceil(perGenre / 3)), ...pool.tracks];
-  });
+  // Em "Só descobertas", tira dos gêneros o que você já ouve.
+  const known = new Set(fam.top.map((t) => t.id));
+  const genreCandidates = pools.map((pool) =>
+    req.taste === 'novo' ? pool.tracks.filter((t) => !known.has(t.id)) : pool.tracks,
+  );
 
   const familiarLane: STrack[] = [];
   for (const t of familiarAll) {
-    if (familiarLane.length >= familiarTarget) break;
+    if (familiarLane.length >= Math.max(familiarTarget, Math.min(fam.picked.length, 12))) break;
     if (take(t)) familiarLane.push(t);
   }
   const genreLanes = genreCandidates.map((list) => {
@@ -181,7 +184,7 @@ export async function buildAndCreate(sp: Spotify, req: MixRequest): Promise<MixR
   // Se algum gênero veio curto, completa com o que sobrou.
   let total = familiarLane.length + genreLanes.reduce((s, l) => s + l.length, 0);
   const extra: STrack[] = [];
-  for (const t of [...roundRobin(genreCandidates), ...familiarAll]) {
+  for (const t of [...roundRobin(genreCandidates), ...(req.taste === 'novo' ? [] : familiarAll)]) {
     if (total >= targetCount) break;
     if (take(t)) {
       extra.push(t);
@@ -209,7 +212,8 @@ export async function buildAndCreate(sp: Spotify, req: MixRequest): Promise<MixR
   }
 
   const labels = req.genres.map(labelOf);
-  const description = clean(`${joinPt(labels)}, com base no que você ouve. Feita no Mistura.`, 300);
+  const base = req.taste === 'novo' ? 'pra descobrir' : 'com base no que você ouve';
+  const description = clean(`${joinPt(labels)}, ${base}. Feita no Mistura.`, 300);
   const playlist = await sp.createPlaylist(playlistName(labels, req.vibe), description);
 
   try {

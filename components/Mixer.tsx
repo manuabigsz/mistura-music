@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import Poster from './Poster';
 import { CUSTOM_PREFIX, DEFAULT_GENRES, GENRES, genreLabel } from '@/lib/genres';
-import { DURATIONS, FAMILIAR_SHARE, LIMITS, TASTES, estimateCount, type Taste } from '@/lib/options';
+import { DURATIONS, LIMITS, TASTES, estimateCount, type Taste } from '@/lib/options';
+import { renderPoster } from '@/lib/poster-image';
 import { joinPt } from '@/lib/text';
 
 type Artist = { id: string; name: string };
@@ -15,6 +16,10 @@ type Created = {
   tracks: number;
   minutes: number;
   at: number;
+  /** Pra redesenhar o cartaz na hora de compartilhar. */
+  artists?: string[];
+  foot?: string[];
+  base?: string;
 };
 type MeState =
   | { status: 'loading' }
@@ -47,6 +52,8 @@ function isCreated(x: unknown): x is Created {
   const c = x as Created;
   return !!c && typeof c.id === 'string' && typeof c.name === 'string' && typeof c.at === 'number';
 }
+const fileName = (name: string) =>
+  `${name.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^\w]+/g, '-').replace(/^-|-$/g, '').toLowerCase() || 'mistura'}.png`;
 
 export default function Mixer() {
   const [sel, setSel] = useState<string[]>(DEFAULT_GENRES);
@@ -63,7 +70,11 @@ export default function Mixer() {
   const [stamp, setStamp] = useState<{ key: string; config: string } | null>(null);
   const [history, setHistory] = useState<Created[]>([]);
   const [hydrated, setHydrated] = useState(false);
+  const [share, setShare] = useState<{ id: string; file: File } | null>(null);
+  const [shareMsg, setShareMsg] = useState('');
+  const [goVisible, setGoVisible] = useState(true);
   const resultRef = useRef<HTMLDivElement>(null);
+  const goRef = useRef<HTMLButtonElement>(null);
 
   // Lembra as últimas escolhas e as playlists criadas neste navegador.
   useEffect(() => {
@@ -91,6 +102,15 @@ export default function Mixer() {
   useEffect(() => {
     if (hydrated) writeJSON(KEY_HIST, history.slice(0, 30));
   }, [hydrated, history]);
+
+  // No celular, a barra de baixo com o botão de criar some quando o botão de verdade aparece.
+  useEffect(() => {
+    const el = goRef.current;
+    if (!el || typeof IntersectionObserver === 'undefined') return;
+    const io = new IntersectionObserver(([entry]) => setGoVisible(entry.isIntersecting), { threshold: 0.5 });
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
 
   const loadMe = useCallback(async () => {
     setMe({ status: 'loading' });
@@ -126,11 +146,42 @@ export default function Mixer() {
   const vibeText = vibe.trim();
   const vibeLabel = vibeText ? (/^(pra|para|pro)\s/i.test(vibeText) ? vibeText : `Pra ${vibeText}`) : '';
   const foot = [durObj.poster, tasteObj.poster, vibeLabel].filter(Boolean);
+  const base =
+    pickedArtists.length > 0
+      ? taste === 'novo'
+        ? 'Pra descobrir, sem faltar'
+        : 'Com base no que você ouve, sem faltar'
+      : taste === 'novo'
+        ? 'Pra descobrir coisa nova'
+        : 'Com base no que você ouve';
   const configKey = JSON.stringify([sel, picked, taste, duration, vibeText]);
   const stampKey = stamp && stamp.config === configKey ? stamp.key : null;
-
   const count = estimateCount(duration);
-  const fromYou = Math.round(count * FAMILIAR_SHARE[taste]);
+
+  // Prepara a imagem do cartaz assim que a playlist fica pronta: no iPhone o
+  // compartilhamento precisa sair direto do toque, sem esperar nada.
+  useEffect(() => {
+    if (!last) return;
+    let alive = true;
+    setShareMsg('');
+    renderPoster({
+      genres: last.genres,
+      artists: last.artists ?? [],
+      base: last.base ?? 'Com base no que você ouve',
+      foot: last.foot ?? [],
+      name: last.name,
+      url: last.url,
+    })
+      .then((blob) => alive && setShare({ id: last.id, file: new File([blob], fileName(last.name), { type: 'image/png' }) }))
+      .catch(() => alive && setShare(null));
+    return () => {
+      alive = false;
+    };
+  }, [last]);
+
+  const shareFile = share && last && share.id === last.id ? share.file : null;
+  const canShareFile =
+    !!shareFile && typeof navigator !== 'undefined' && !!navigator.canShare && navigator.canShare({ files: [shareFile] });
 
   /* ---------- Ações ---------- */
   function toggleGenre(id: string) {
@@ -141,10 +192,10 @@ export default function Mixer() {
     e.preventDefault();
     const label = addText.replace(/\s+/g, ' ').trim().slice(0, LIMITS.label);
     if (!label) return;
-    const base = GENRES.find((g) => g.label.toLowerCase() === label.toLowerCase());
+    const found = GENRES.find((g) => g.label.toLowerCase() === label.toLowerCase());
     const existing = custom.find((c) => c.toLowerCase() === label.toLowerCase());
-    const id = base ? base.id : CUSTOM_PREFIX + (existing ?? label);
-    if (!base && !existing) setCustom((c) => [...c, label].slice(-20));
+    const id = found ? found.id : CUSTOM_PREFIX + (existing ?? label);
+    if (!found && !existing) setCustom((c) => [...c, label].slice(-20));
     setSel((s) => (s.includes(id) ? s : [...s, id]));
     setAddText('');
   }
@@ -158,7 +209,7 @@ export default function Mixer() {
     setCreating(true);
     setNotice(null);
     const config = configKey;
-    const genresAtCreation = labels;
+    const snapshot = { genres: labels, artists: pickedArtists.map((a) => a.name), foot, base };
     try {
       const res = await fetch('/api/playlist', {
         method: 'POST',
@@ -180,17 +231,17 @@ export default function Mixer() {
         id: data.id,
         name: typeof data.name === 'string' ? data.name : 'Sua playlist',
         url: safeUrl(data.url),
-        genres: genresAtCreation,
         tracks: Number(data.tracks) || 0,
         minutes: Number(data.minutes) || 0,
         at: Date.now(),
+        ...snapshot,
       };
       setLast(rec);
       setHistory((h) => [rec, ...h.filter((x) => x.id !== rec.id)].slice(0, 30));
       setStamp({ key: rec.id, config });
       if (window.matchMedia('(max-width: 860px)').matches) {
         const smooth = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-        requestAnimationFrame(() => resultRef.current?.scrollIntoView({ block: 'nearest', behavior: smooth ? 'smooth' : 'auto' }));
+        requestAnimationFrame(() => resultRef.current?.scrollIntoView({ block: 'center', behavior: smooth ? 'smooth' : 'auto' }));
       }
     } catch {
       setNotice({
@@ -201,9 +252,66 @@ export default function Mixer() {
     }
   }
 
+  const shareText = (rec: Created) =>
+    rec.url ? `Ouve a minha playlist "${rec.name}", feita no Mistura: ${rec.url}` : `${rec.name}, feita no Mistura`;
+
+  /** Copia o link sem esperar: o toque continua valendo pro compartilhamento que vem logo depois. */
+  function copyQuietly(url: string | null): boolean {
+    if (!url || !navigator.clipboard) return false;
+    navigator.clipboard.writeText(url).catch(() => {});
+    return true;
+  }
+
+  async function sharePoster() {
+    if (!last || !shareFile) return;
+    if (canShareFile) {
+      const copied = copyQuietly(last.url);
+      try {
+        await navigator.share({ files: [shareFile], title: last.name, text: shareText(last) });
+        if (copied) setShareMsg('O link também foi copiado: se o app não mostrar, é só colar na mensagem.');
+      } catch (e) {
+        if ((e as Error)?.name !== 'AbortError') setShareMsg('Não deu pra abrir o compartilhamento. Tente baixar a imagem.');
+      }
+      return;
+    }
+    // Computador sem compartilhamento de arquivos: baixa a imagem.
+    const href = URL.createObjectURL(shareFile);
+    const a = document.createElement('a');
+    a.href = href;
+    a.download = shareFile.name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(href), 10_000);
+    setShareMsg(
+      copyQuietly(last.url) ? 'Imagem baixada e link copiado. É só postar os dois juntos.' : 'Imagem baixada.',
+    );
+  }
+
+  /** Só o link, com texto: é o que aparece com prévia no WhatsApp. */
+  async function shareLink() {
+    if (!last?.url) return;
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: last.name, text: shareText(last), url: last.url });
+      } catch (e) {
+        if ((e as Error)?.name !== 'AbortError') setShareMsg(`Não deu pra compartilhar. O link é ${last.url}`);
+      }
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(shareText(last));
+      setShareMsg('Link copiado com uma mensagem pronta.');
+    } catch {
+      setShareMsg(`Não deu pra copiar. O link é ${last.url}`);
+    }
+  }
+
   function removeFromList(id: string) {
     setHistory((h) => h.filter((x) => x.id !== id));
     if (last?.id === id) setLast(null);
+  }
+
+  function scrollToCreate() {
+    goRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
   }
 
   /* ---------- Status ---------- */
@@ -222,13 +330,13 @@ export default function Mixer() {
       <header className="top">
         <div>
           <h1 className="brand">Mistura</h1>
-          <p className="lede">Monte uma playlist no Spotify a partir do que você já ouve, com os gêneros que quiser.</p>
+          <p className="lede">Escolha os gêneros, ajuste o resto e o Mistura cria a playlist direto no seu Spotify.</p>
         </div>
         <form className="account" action="/api/auth/logout" method="post">
           {me.status !== 'loading' && (me.name || me.email) && (
-            <span>
-              Conectado como {me.name ?? me.email}
-              {me.name && me.email && ` (${me.email})`}
+            <span className="who">
+              <span>Conectado como {me.name ?? me.email}</span>
+              {me.name && me.email && <span className="email">{me.email}</span>}
             </span>
           )}
           <button type="submit" className="linkish">
@@ -240,20 +348,30 @@ export default function Mixer() {
       <main className="layout">
         <div className="controls">
           <section className="block" aria-labelledby="h-genres">
-            <h2 id="h-genres">O que entra na mistura</h2>
-            <p className="hint">Escolha quantos quiser. A ordem dos toques vira a ordem do cartaz.</p>
+            <h2 id="h-genres">
+              <span className="step">1</span>Gêneros
+            </h2>
+            <p className="hint">Toque em quantos quiser. A ordem dos toques vira a ordem do cartaz.</p>
             <div className="chips" role="group" aria-labelledby="h-genres">
-              {allGenres.map((g) => (
-                <button
-                  key={g.id}
-                  type="button"
-                  className="chip"
-                  aria-pressed={sel.includes(g.id)}
-                  onClick={() => toggleGenre(g.id)}
-                >
-                  {g.label}
-                </button>
-              ))}
+              {allGenres.map((g) => {
+                const order = sel.indexOf(g.id);
+                return (
+                  <button
+                    key={g.id}
+                    type="button"
+                    className="chip"
+                    aria-pressed={order >= 0}
+                    onClick={() => toggleGenre(g.id)}
+                  >
+                    {order >= 0 && (
+                      <span className="ord" aria-hidden="true">
+                        {order + 1}
+                      </span>
+                    )}
+                    {g.label}
+                  </button>
+                );
+              })}
             </div>
             <form className="addrow" onSubmit={addGenre} autoComplete="off">
               <label className="sr" htmlFor="add-genre">
@@ -266,19 +384,33 @@ export default function Mixer() {
                 placeholder="Outro gênero, tipo piseiro"
                 value={addText}
                 onChange={(e) => setAddText(e.target.value)}
+                enterKeyHint="done"
               />
-              <button className="ghost" type="submit">
+              <button className="ghost" type="submit" disabled={!addText.trim()}>
                 Adicionar
               </button>
             </form>
           </section>
 
+          <section className="block" aria-labelledby="h-taste">
+            <h2 id="h-taste">
+              <span className="step">2</span>Conhecidas ou novidades
+            </h2>
+            <div className="seg" role="group" aria-labelledby="h-taste">
+              {TASTES.map((t) => (
+                <button key={t.id} type="button" aria-pressed={t.id === taste} onClick={() => setTaste(t.id)}>
+                  {t.label}
+                </button>
+              ))}
+            </div>
+            <p className="hint after">{tasteObj.hint}</p>
+          </section>
+
           <section className="block" aria-labelledby="h-artists">
-            <h2 id="h-artists">Seu som como base</h2>
-            <p className="hint">
-              Toque nos artistas que não podem faltar. Mesmo sem escolher nenhum, a playlist parte do que você mais ouve e
-              do que tocou por último.
-            </p>
+            <h2 id="h-artists">
+              <span className="step">3</span>Artistas que não podem faltar <span className="opt">opcional</span>
+            </h2>
+            <p className="hint">Seus mais ouvidos. Os que você marcar entram com certeza, mesmo fora dos gêneros.</p>
             <div aria-live="polite">
               {me.status === 'loading' && <p className="hint">Buscando seus artistas mais ouvidos…</p>}
               {me.status === 'error' && (
@@ -296,7 +428,7 @@ export default function Mixer() {
                 </>
               )}
               {me.status === 'ready' && artists.length === 0 && (
-                <p className="msg">O Spotify ainda não tem seus mais ouvidos. A playlist usa o que tocou por último.</p>
+                <p className="msg">O Spotify ainda não tem seus mais ouvidos.</p>
               )}
               {me.status === 'ready' && artists.length > 0 && (
                 <div className="chips" role="group" aria-label="Seus artistas mais ouvidos">
@@ -316,19 +448,10 @@ export default function Mixer() {
             </div>
           </section>
 
-          <section className="block" aria-labelledby="h-taste">
-            <h2 id="h-taste">Conhecidas ou novidades</h2>
-            <div className="seg" role="group" aria-labelledby="h-taste">
-              {TASTES.map((t) => (
-                <button key={t.id} type="button" aria-pressed={t.id === taste} onClick={() => setTaste(t.id)}>
-                  {t.label}
-                </button>
-              ))}
-            </div>
-          </section>
-
           <section className="block" aria-labelledby="h-dur">
-            <h2 id="h-dur">Duração</h2>
+            <h2 id="h-dur">
+              <span className="step">4</span>Duração
+            </h2>
             <div className="seg" role="group" aria-labelledby="h-dur">
               {DURATIONS.map((d) => (
                 <button key={d.min} type="button" aria-pressed={d.min === duration} onClick={() => setDuration(d.min)}>
@@ -339,8 +462,10 @@ export default function Mixer() {
           </section>
 
           <section className="block" aria-labelledby="h-vibe">
-            <h2 id="h-vibe">Pra quê?</h2>
-            <p className="hint">Opcional. Vira o nome da playlist.</p>
+            <h2 id="h-vibe">
+              <span className="step">5</span>Pra quê? <span className="opt">opcional</span>
+            </h2>
+            <p className="hint">Vira o nome da playlist.</p>
             <input
               className="field wide"
               aria-labelledby="h-vibe"
@@ -349,44 +474,17 @@ export default function Mixer() {
               value={vibe}
               onChange={(e) => setVibe(e.target.value)}
               autoComplete="off"
+              enterKeyHint="done"
             />
           </section>
-
-          {history.length > 0 && (
-            <section className="block" aria-labelledby="h-hist">
-              <h2 id="h-hist">Criadas aqui</h2>
-              <ul className="list">
-                {history.map((rec) => (
-                  <li key={rec.id}>
-                    <p className="name">{rec.name}</p>
-                    <p className="meta">
-                      {[joinPt(rec.genres), `${rec.tracks} músicas`, dateFmt.format(new Date(rec.at))].join(', ')}
-                    </p>
-                    <div className="actions">
-                      {rec.url && (
-                        <a className="btn" href={rec.url} target="_blank" rel="noopener noreferrer">
-                          Abrir no Spotify
-                        </a>
-                      )}
-                      <button type="button" className="linkish" onClick={() => removeFromList(rec.id)}>
-                        Tirar da lista
-                      </button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
         </div>
 
         <aside className="stage" aria-label="Prévia e criação">
-          <Poster genres={labels} artists={pickedArtists.map((a) => a.name)} foot={foot} stampKey={stampKey} />
-          <button className="go" type="button" onClick={create} disabled={creating || !sel.length}>
+          <Poster genres={labels} artists={pickedArtists.map((a) => a.name)} foot={foot} base={base} stampKey={stampKey} />
+          <button ref={goRef} className="go" type="button" onClick={create} disabled={creating || !sel.length}>
             {creating ? 'Criando…' : 'Criar playlist no Spotify'}
           </button>
-          <p className="hint mix-hint">
-            Cerca de {count} músicas: umas {fromYou} do seu som e {count - fromYou} dos gêneros.
-          </p>
+          <p className="hint mix-hint">Cerca de {count} músicas. Fica privada no seu Spotify.</p>
 
           <div className="status" role="status" aria-live="polite">
             {status && (
@@ -412,15 +510,68 @@ export default function Mixer() {
               <p className="meta">
                 {last.tracks} músicas, cerca de {last.minutes} minutos
               </p>
-              {last.url && (
-                <a className="btn solid" href={last.url} target="_blank" rel="noopener noreferrer">
-                  Abrir no Spotify
-                </a>
-              )}
+              <div className="actions">
+                {last.url && (
+                  <a className="btn solid" href={last.url} target="_blank" rel="noopener noreferrer">
+                    Abrir no Spotify
+                  </a>
+                )}
+                <button type="button" className="btn" onClick={sharePoster} disabled={!shareFile}>
+                  {!shareFile ? 'Preparando cartaz…' : canShareFile ? 'Compartilhar cartaz' : 'Baixar cartaz'}
+                </button>
+                {last.url && (
+                  <button type="button" className="btn" onClick={shareLink}>
+                    Enviar link
+                  </button>
+                )}
+              </div>
+              {shareMsg && <p className="meta share-msg">{shareMsg}</p>}
             </div>
           )}
         </aside>
+
+        {history.length > 0 && (
+          <section className="block history" aria-labelledby="h-hist">
+            <h2 id="h-hist">Criadas aqui</h2>
+            <ul className="list">
+              {history.map((rec) => (
+                <li key={rec.id}>
+                  <p className="name">{rec.name}</p>
+                  <p className="meta">
+                    {[joinPt(rec.genres), `${rec.tracks} músicas`, dateFmt.format(new Date(rec.at))].join(', ')}
+                  </p>
+                  <div className="actions">
+                    {rec.url && (
+                      <a className="btn" href={rec.url} target="_blank" rel="noopener noreferrer">
+                        Abrir no Spotify
+                      </a>
+                    )}
+                    {rec.id !== last?.id && (
+                      <button type="button" className="btn" onClick={() => setLast(rec)}>
+                        Ver cartaz
+                      </button>
+                    )}
+                    <button type="button" className="linkish" onClick={() => removeFromList(rec.id)}>
+                      Tirar da lista
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
       </main>
+
+      {!goVisible && (
+        <div className="dock">
+          <span className="dock-sum">
+            {sel.length ? `${joinPt(labels.slice(0, 3))}${labels.length > 3 ? '…' : ''} · ~${count} músicas` : 'Escolha um gênero'}
+          </span>
+          <button type="button" className="dock-go" onClick={scrollToCreate} disabled={!sel.length}>
+            Ver e criar
+          </button>
+        </div>
+      )}
     </>
   );
 }
