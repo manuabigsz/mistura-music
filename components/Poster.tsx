@@ -1,6 +1,7 @@
 'use client';
 
-import { useLayoutEffect, useRef } from 'react';
+import { useLayoutEffect, useRef, type CSSProperties } from 'react';
+import { cssGradient, DEFAULT_THEME, type PosterTheme } from '@/lib/poster-themes';
 import { joinPt } from '@/lib/text';
 
 type Props = {
@@ -9,12 +10,13 @@ type Props = {
   foot: string[];
   /** Linha abaixo dos gêneros, ex.: "Com base no que você ouve". */
   base: string;
+  theme?: PosterTheme;
   /** Muda a cada playlist criada; enquanto existir, o carimbo aparece. */
   stampKey?: string | null;
 };
 
 /** Cartaz estilo lambe-lambe: cada gênero ocupa a largura toda da linha. */
-export default function Poster({ genres, artists, foot, base, stampKey }: Props) {
+export default function Poster({ genres, artists, foot, base, theme = DEFAULT_THEME, stampKey }: Props) {
   const billRef = useRef<HTMLDivElement>(null);
   const big = genres.slice(0, 5);
   const rest = genres.slice(5);
@@ -47,7 +49,18 @@ export default function Poster({ genres, artists, foot, base, stampKey }: Props)
   }, [signature]);
 
   return (
-    <div className="poster" aria-hidden="true">
+    <div
+      className={theme.grain === 'light' ? 'poster grain-light' : 'poster'}
+      aria-hidden="true"
+      style={
+        {
+          '--p-bg': cssGradient(theme),
+          '--p-ink': theme.ink,
+          '--p-foot-bg': theme.footBg,
+          '--p-foot-ink': theme.footInk,
+        } as CSSProperties
+      }
+    >
       <p className="p-kicker">Sua playlist apresenta</p>
       <div className="bill" ref={billRef}>
         {lines.map((line, i) => (

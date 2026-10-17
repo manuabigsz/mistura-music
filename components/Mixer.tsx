@@ -4,7 +4,8 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import Poster from './Poster';
 import { CUSTOM_PREFIX, DEFAULT_GENRES, GENRES, genreLabel } from '@/lib/genres';
 import { DURATIONS, LIMITS, TASTES, estimateCount, type Taste } from '@/lib/options';
-import { renderPoster } from '@/lib/poster-image';
+import { renderCover, renderPoster } from '@/lib/poster-image';
+import { DEFAULT_THEME, POSTER_THEMES, cssGradient, themeById } from '@/lib/poster-themes';
 import { joinPt } from '@/lib/text';
 
 type Artist = { id: string; name: string };
@@ -20,6 +21,7 @@ type Created = {
   artists?: string[];
   foot?: string[];
   base?: string;
+  theme?: string;
 };
 type MeState =
   | { status: 'loading' }
@@ -61,6 +63,7 @@ export default function Mixer() {
   const [taste, setTaste] = useState<Taste>('equilibrado');
   const [duration, setDuration] = useState(0);
   const [vibe, setVibe] = useState('');
+  const [themeId, setThemeId] = useState(DEFAULT_THEME.id);
   const [picked, setPicked] = useState<string[]>([]);
   const [addText, setAddText] = useState('');
   const [me, setMe] = useState<MeState>({ status: 'loading' });
@@ -72,6 +75,13 @@ export default function Mixer() {
   const [hydrated, setHydrated] = useState(false);
   const [share, setShare] = useState<{ id: string; file: File } | null>(null);
   const [shareMsg, setShareMsg] = useState('');
+  const [cover, setCover] = useState<{
+    id: string;
+    theme: string;
+    status: 'sending' | 'ok' | 'error';
+    message?: string;
+    relogin?: boolean;
+  } | null>(null);
   const [goVisible, setGoVisible] = useState(true);
   const resultRef = useRef<HTMLDivElement>(null);
   const goRef = useRef<HTMLButtonElement>(null);
@@ -89,6 +99,7 @@ export default function Mixer() {
       if (TASTES.some((t) => t.id === p.taste)) setTaste(p.taste as Taste);
       if (DURATIONS.some((d) => d.min === p.duration)) setDuration(p.duration as number);
       if (typeof p.vibe === 'string') setVibe(p.vibe.slice(0, LIMITS.vibe));
+      setThemeId(themeById(p.theme).id);
     }
     const h = readJSON(KEY_HIST);
     if (Array.isArray(h)) setHistory(h.filter(isCreated).slice(0, 30));
@@ -96,8 +107,8 @@ export default function Mixer() {
   }, []);
 
   useEffect(() => {
-    if (hydrated) writeJSON(KEY_PREFS, { sel, custom, taste, duration, vibe });
-  }, [hydrated, sel, custom, taste, duration, vibe]);
+    if (hydrated) writeJSON(KEY_PREFS, { sel, custom, taste, duration, vibe, theme: themeId });
+  }, [hydrated, sel, custom, taste, duration, vibe, themeId]);
 
   useEffect(() => {
     if (hydrated) writeJSON(KEY_HIST, history.slice(0, 30));
@@ -157,6 +168,7 @@ export default function Mixer() {
   const configKey = JSON.stringify([sel, picked, taste, duration, vibeText]);
   const stampKey = stamp && stamp.config === configKey ? stamp.key : null;
   const count = estimateCount(duration);
+  const theme = themeById(themeId);
 
   // Prepara a imagem do cartaz assim que a playlist fica pronta: no iPhone o
   // compartilhamento precisa sair direto do toque, sem esperar nada.
@@ -171,6 +183,7 @@ export default function Mixer() {
       foot: last.foot ?? [],
       name: last.name,
       url: last.url,
+      theme: themeById(last.theme),
     })
       .then((blob) => alive && setShare({ id: last.id, file: new File([blob], fileName(last.name), { type: 'image/png' }) }))
       .catch(() => alive && setShare(null));
@@ -209,7 +222,7 @@ export default function Mixer() {
     setCreating(true);
     setNotice(null);
     const config = configKey;
-    const snapshot = { genres: labels, artists: pickedArtists.map((a) => a.name), foot, base };
+    const snapshot = { genres: labels, artists: pickedArtists.map((a) => a.name), foot, base, theme: themeId };
     try {
       const res = await fetch('/api/playlist', {
         method: 'POST',
@@ -239,6 +252,7 @@ export default function Mixer() {
       setLast(rec);
       setHistory((h) => [rec, ...h.filter((x) => x.id !== rec.id)].slice(0, 30));
       setStamp({ key: rec.id, config });
+      uploadCover(rec);
       if (window.matchMedia('(max-width: 860px)').matches) {
         const smooth = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
         requestAnimationFrame(() => resultRef.current?.scrollIntoView({ block: 'center', behavior: smooth ? 'smooth' : 'auto' }));
@@ -249,6 +263,41 @@ export default function Mixer() {
       });
     } finally {
       setCreating(false);
+    }
+  }
+
+  /** Põe o cartaz quadrado como capa da playlist no Spotify. */
+  async function uploadCover(rec: Created) {
+    const themeOf = rec.theme ?? DEFAULT_THEME.id;
+    setCover({ id: rec.id, theme: themeOf, status: 'sending' });
+    try {
+      const image = await renderCover({
+        genres: rec.genres,
+        artists: rec.artists ?? [],
+        base: rec.base ?? '',
+        foot: rec.foot ?? [],
+        name: rec.name,
+        theme: themeById(themeOf),
+      });
+      const res = await fetch('/api/playlist/cover', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: rec.id, image }),
+      });
+      const data = await res.json().catch(() => null);
+      setCover(
+        res.ok
+          ? { id: rec.id, theme: themeOf, status: 'ok' }
+          : {
+              id: rec.id,
+              theme: themeOf,
+              status: 'error',
+              message: data?.message ?? 'Não deu pra pôr a capa.',
+              relogin: res.status === 401 || data?.error === 'forbidden',
+            },
+      );
+    } catch {
+      setCover({ id: rec.id, theme: themeOf, status: 'error', message: 'Não deu pra pôr a capa.' });
     }
   }
 
@@ -475,7 +524,33 @@ export default function Mixer() {
         </div>
 
         <aside className="stage" aria-label="Prévia e criação">
-          <Poster genres={labels} artists={pickedArtists.map((a) => a.name)} foot={foot} base={base} stampKey={stampKey} />
+          <Poster
+            genres={labels}
+            artists={pickedArtists.map((a) => a.name)}
+            foot={foot}
+            base={base}
+            theme={theme}
+            stampKey={stampKey}
+          />
+          <div className="themes" role="group" aria-label="Estilo do cartaz">
+            {POSTER_THEMES.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                className="swatch"
+                aria-pressed={t.id === themeId}
+                aria-label={t.label}
+                title={t.label}
+                onClick={() => {
+                  setThemeId(t.id);
+                  // A playlist que acabou de sair acompanha o estilo, pra compartilhar já com ele.
+                  if (last) setLast({ ...last, theme: t.id });
+                }}
+                style={{ background: cssGradient(t), ['--sw-ink' as string]: t.ink }}
+              />
+            ))}
+          </div>
+          <p className="theme-name">Estilo do cartaz: {theme.label}</p>
           <button ref={goRef} className="go" type="button" onClick={create} disabled={creating || !sel.length}>
             {creating ? 'Criando…' : 'Criar playlist no Spotify'}
           </button>
@@ -515,6 +590,41 @@ export default function Mixer() {
                   {shareFile ? 'Compartilhar' : 'Preparando…'}
                 </button>
               </div>
+              {cover?.id === last.id && (
+                <div className="cover-row">
+                  {cover.status === 'sending' && <p className="meta">Colocando o cartaz como capa…</p>}
+                  {cover.status === 'ok' && (
+                    <p className="meta">
+                      ✓ Cartaz na capa da playlist. O Spotify pode levar alguns minutos pra mostrar.
+                    </p>
+                  )}
+                  {cover.status === 'error' && (
+                    <>
+                      <p className="meta">{cover.message}</p>
+                      {cover.relogin && (
+                        <a className="linkish" href="/api/auth/login">
+                          Entrar de novo
+                        </a>
+                      )}
+                    </>
+                  )}
+                  {cover.status !== 'sending' && (last.theme ?? DEFAULT_THEME.id) !== cover.theme && (
+                    <button type="button" className="btn" onClick={() => uploadCover(last)}>
+                      Usar este estilo na capa
+                    </button>
+                  )}
+                  {cover.status === 'error' && !cover.relogin && (last.theme ?? DEFAULT_THEME.id) === cover.theme && (
+                    <button type="button" className="linkish" onClick={() => uploadCover(last)}>
+                      Tentar de novo
+                    </button>
+                  )}
+                </div>
+              )}
+              {cover?.id !== last.id && (
+                <button type="button" className="linkish" onClick={() => uploadCover(last)}>
+                  Pôr o cartaz como capa
+                </button>
+              )}
               {shareMsg && <p className="meta share-msg">{shareMsg}</p>}
             </div>
           )}

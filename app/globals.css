@@ -390,8 +390,8 @@ body {
   position: relative;
   isolation: isolate;
   overflow: hidden;
-  color: #000;
-  background: linear-gradient(180deg, #ffe600 0%, #ffe600 14%, #ff8a00 50%, #ff2e97 86%, #ff2e97 100%);
+  color: var(--p-ink, #000);
+  background: var(--p-bg, linear-gradient(180deg, #ffe600 0%, #ffe600 14%, #ff8a00 50%, #ff2e97 86%, #ff2e97 100%));
   padding: 20px 20px 0;
   box-shadow: 0 0 0 2px var(--ink);
 }
@@ -437,7 +437,7 @@ body {
 }
 .p-rule {
   border: 0;
-  border-top: 3px solid #000;
+  border-top: 3px solid var(--p-ink, #000);
   margin: 16px 0 12px;
 }
 .p-base {
@@ -464,8 +464,8 @@ body {
   z-index: 3;
   margin: 0 -20px;
   padding: 12px 20px 14px;
-  background: #000;
-  color: #ffe600;
+  background: var(--p-foot-bg, #000);
+  color: var(--p-foot-ink, #ffe600);
   display: flex;
   flex-wrap: wrap;
   justify-content: space-between;
@@ -482,15 +482,15 @@ body {
   right: 16px;
   top: 36%;
   transform: rotate(-9deg);
-  background: #000;
-  color: #ffe600;
+  background: var(--p-foot-bg, #000);
+  color: var(--p-foot-ink, #ffe600);
   font-family: var(--display);
   font-weight: 900;
   font-size: 48px;
   line-height: 1;
   text-transform: uppercase;
   padding: 6px 18px 9px;
-  outline: 3px solid #000;
+  outline: 3px solid var(--p-foot-bg, #000);
   outline-offset: 4px;
   animation: thump 0.32s cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
 }
@@ -631,4 +631,57 @@ body {
   cursor: pointer;
   text-decoration: underline;
   text-underline-offset: 3px;
+}
+
+/* Granulado claro pros cartazes de fundo escuro. */
+.poster.grain-light::after {
+  mix-blend-mode: screen;
+  filter: invert(1);
+  opacity: 0.12;
+}
+
+/* Estilos do cartaz */
+.themes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+}
+.swatch {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 2px solid var(--soft);
+  padding: 0;
+  cursor: pointer;
+  position: relative;
+}
+.swatch[aria-pressed='true'] {
+  border-color: var(--ink);
+  box-shadow: 0 0 0 3px var(--page), 0 0 0 6px var(--hot);
+}
+.swatch[aria-pressed='true']::after {
+  content: '✓';
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-weight: 800;
+  font-size: 16px;
+  color: var(--sw-ink);
+}
+.theme-name {
+  margin: 8px 0 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+.cover-row {
+  margin-top: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+.cover-row .meta {
+  margin: 0;
 }

@@ -3,9 +3,10 @@ import type { Tokens } from './session';
 
 const ACCOUNTS = 'https://accounts.spotify.com';
 
-/** Só o necessário: mais ouvidos, tocadas recentemente e criar playlists. */
+/** Só o necessário: mais ouvidos, tocadas recentemente, criar playlists e pôr a capa. */
 export const SCOPES = [
   'user-read-email',
+  'ugc-image-upload',
   'user-top-read',
   'user-read-recently-played',
   'playlist-modify-private',

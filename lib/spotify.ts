@@ -125,7 +125,7 @@ export class Spotify {
     return this.refreshing;
   }
 
-  async call<T>(method: string, path: string, opts: { query?: Query; body?: unknown } = {}, attempt = 0): Promise<T> {
+  async call<T>(method: string, path: string, opts: { query?: Query; body?: unknown; jpeg?: string } = {}, attempt = 0): Promise<T> {
     const url = new URL(API + path);
     for (const [k, v] of Object.entries(opts.query ?? {})) if (v !== undefined) url.searchParams.set(k, String(v));
     const token = await this.accessToken();
@@ -137,9 +137,9 @@ export class Spotify {
         cache: 'no-store',
         headers: {
           Authorization: `Bearer ${token}`,
-          ...(opts.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+          ...(opts.jpeg !== undefined ? { 'Content-Type': 'image/jpeg' } : opts.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
         },
-        body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+        body: opts.jpeg ?? (opts.body !== undefined ? JSON.stringify(opts.body) : undefined),
         signal: AbortSignal.timeout(15_000),
       });
     } catch {
@@ -251,6 +251,11 @@ export class Spotify {
       );
     }
     return { id: r.id, uri: r.uri ?? `spotify:playlist:${r.id}`, name: r.name ?? name, url: r.external_urls?.spotify ?? null };
+  }
+
+  /** Troca a capa da playlist. `jpeg` é o JPEG em base64, até 256 KB. Precisa de ugc-image-upload. */
+  async setCover(playlistId: string, jpeg: string): Promise<void> {
+    await this.call('PUT', `/playlists/${encodeURIComponent(playlistId)}/images`, { jpeg });
   }
 
   async addItems(playlistId: string, uris: string[]): Promise<void> {
