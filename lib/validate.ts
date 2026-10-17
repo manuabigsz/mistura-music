@@ -1,9 +1,11 @@
 import { CUSTOM_PREFIX, genreById } from './genres';
-import type { GenreChoice, MixRequest } from './mix';
+import type { GenreChoice, MixRequest, Weight } from './mix';
 import { LIMITS, TASTES, sizeById, type Taste } from './options';
 import { clean, norm } from './text';
 
 const ARTIST_ID = /^[0-9A-Za-z]{22}$/;
+
+const weightOf = (w: unknown): Weight => (w === 1 || w === 3 ? w : 2);
 
 /** Valida o corpo do POST /api/playlist. Devolve o pedido ou uma mensagem de erro. */
 export function parseMixRequest(body: unknown): MixRequest | string {
@@ -11,6 +13,7 @@ export function parseMixRequest(body: unknown): MixRequest | string {
   const b = body as Record<string, unknown>;
 
   const genres: GenreChoice[] = [];
+  const gw = b.genreWeights && typeof b.genreWeights === 'object' ? (b.genreWeights as Record<string, unknown>) : {};
   const seen = new Set<string>();
   let customCount = 0;
   for (const raw of Array.isArray(b.genres) ? b.genres.slice(0, 40) : []) {
@@ -21,12 +24,12 @@ export function parseMixRequest(body: unknown): MixRequest | string {
       if (!label || seen.has(key) || customCount >= LIMITS.customGenres) continue;
       seen.add(key);
       customCount++;
-      genres.push({ kind: 'custom', label });
+      genres.push({ kind: 'custom', label, weight: weightOf(gw[raw]) });
     } else {
       const g = genreById(raw);
       if (!g || seen.has(g.id)) continue;
       seen.add(g.id);
-      genres.push({ kind: 'base', genre: g });
+      genres.push({ kind: 'base', genre: g, weight: weightOf(gw[raw]) });
     }
   }
   if (!genres.length) return 'Escolha pelo menos um gênero.';
@@ -35,16 +38,17 @@ export function parseMixRequest(body: unknown): MixRequest | string {
   const picked: MixRequest['picked'] = [];
   for (const raw of Array.isArray(b.picked) ? b.picked.slice(0, LIMITS.picked) : []) {
     if (!raw || typeof raw !== 'object') continue;
-    const { id, name } = raw as { id?: unknown; name?: unknown };
+    const { id, name, weight } = raw as { id?: unknown; name?: unknown; weight?: unknown };
     if (typeof id !== 'string' || !ARTIST_ID.test(id) || typeof name !== 'string' || !name.trim()) continue;
-    picked.push({ id, name: clean(name) });
+    picked.push({ id, name: clean(name), weight: weightOf(weight) });
   }
 
-  const must: string[] = [];
+  const must: MixRequest['must'] = [];
   for (const raw of Array.isArray(b.must) ? b.must.slice(0, LIMITS.must) : []) {
-    if (typeof raw !== 'string') continue;
-    const name = clean(raw, 60);
-    if (name && !must.some((m) => norm(m) === norm(name))) must.push(name);
+    const r = typeof raw === 'string' ? { name: raw } : (raw as { name?: unknown; weight?: unknown } | null);
+    if (!r || typeof r.name !== 'string') continue;
+    const name = clean(r.name, 60);
+    if (name && !must.some((m) => norm(m.name) === norm(name))) must.push({ name, weight: weightOf(r.weight) });
   }
 
   const taste: Taste = TASTES.some((t) => t.id === b.taste) ? (b.taste as Taste) : 'equilibrado';

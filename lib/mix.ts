@@ -3,14 +3,17 @@ import type { Genre } from './genres';
 import { AVG_TRACK_MS, FAMILIAR_SHARE, estimateCount, type Size, type Taste } from './options';
 import { clean, joinPt, norm } from './text';
 
-export type GenreChoice = { kind: 'base'; genre: Genre } | { kind: 'custom'; label: string };
+/** Quanto de cada gênero ou artista: 1 pouco, 2 normal, 3 muito. */
+export type Weight = 1 | 2 | 3;
+
+export type GenreChoice = ({ kind: 'base'; genre: Genre } | { kind: 'custom'; label: string }) & { weight: Weight };
 
 export type MixRequest = {
   genres: GenreChoice[];
   /** Artistas marcados entre os mais ouvidos (com id). */
-  picked: { id: string; name: string }[];
+  picked: { id: string; name: string; weight: Weight }[];
   /** Artistas digitados que têm que entrar (só o nome). */
-  must: string[];
+  must: { name: string; weight: Weight }[];
   taste: Taste;
   size: Size;
   vibe: string;
@@ -25,7 +28,11 @@ export type MixResult = {
   minutes: number;
 };
 
-type Wanted = { id?: string; name: string };
+type Wanted = { id?: string; name: string; weight: Weight };
+
+/** Peso relativo de cada nível: "muito" vale quase quatro vezes "pouco". */
+const GENRE_MULT: Record<Weight, number> = { 1: 0.5, 2: 1, 3: 1.9 };
+const ARTIST_MULT: Record<Weight, number> = { 1: 0.45, 2: 1, 3: 2 };
 type Lane = { key: string; tracks: STrack[] };
 
 const labelOf = (c: GenreChoice) => (c.kind === 'base' ? c.genre.label : c.label);
@@ -83,16 +90,16 @@ async function searchPages(sp: Spotify, q: string, pages: number): Promise<STrac
   return lists.flatMap((l) => l ?? []);
 }
 
-const pagesFor = (n: number) => Math.min(3, Math.max(1, Math.ceil(n / 8)));
+const pagesFor = (n: number) => Math.min(4, Math.max(1, Math.ceil(n / 8)));
 
 /** Músicas de cada artista pedido, das mais relevantes pras menos. */
-async function wantedPool(sp: Spotify, wanted: Wanted[], perArtist: number) {
-  const lists = await settle(wanted, 3, async (w) => {
+async function wantedPool(sp: Spotify, wanted: Wanted[], quotas: number[]) {
+  const lists = await settle(wanted.map((w, i) => ({ w, quota: quotas[i] })), 3, async ({ w, quota }) => {
     const key = norm(w.name);
-    const found = await searchPages(sp, `artist:"${clean(w.name)}"`, pagesFor(perArtist));
+    const found = await searchPages(sp, `artist:"${clean(w.name)}"`, pagesFor(quota));
     return found.filter((t) => t.artists.some((a) => (w.id ? a.id === w.id : norm(a.name) === key)));
   });
-  return wanted.map((w, i) => ({ artist: w, tracks: lists[i] ?? [] }));
+  return wanted.map((w, i) => ({ artist: w, quota: quotas[i], tracks: lists[i] ?? [] }));
 }
 
 async function topPool(sp: Spotify): Promise<STrack[]> {
@@ -184,22 +191,30 @@ export async function buildAndCreate(sp: Spotify, req: MixRequest): Promise<MixR
   const targetMs = req.size.minutes ? req.size.minutes * 60_000 : null;
   const targetCount = estimateCount(req.size) + (targetMs ? 3 : 0);
 
-  // Artistas pedidos: cada um ganha uma cota garantida, dividida em até 30% da playlist.
+  // Artistas pedidos: cada um ganha uma cota garantida, maior ou menor conforme o peso.
+  // Juntos ocupam no máximo metade da playlist.
   const pickedKeys = new Set(req.picked.map((p) => norm(p.name)));
-  const wanted: Wanted[] = [...req.picked, ...req.must.filter((m) => !pickedKeys.has(norm(m))).map((name) => ({ name }))];
-  const perArtist = wanted.length
-    ? Math.max(3, Math.min(20, Math.round((targetCount * 0.3) / wanted.length)))
-    : 0;
+  const wanted: Wanted[] = [...req.picked, ...req.must.filter((m) => !pickedKeys.has(norm(m.name)))];
+  const baseQuota = wanted.length ? (targetCount * 0.3) / wanted.length : 0;
+  let quotas = wanted.map((w) => Math.max(2, Math.round(baseQuota * ARTIST_MULT[w.weight])));
+  const quotaSum = quotas.reduce((s, q) => s + q, 0);
+  if (quotaSum > targetCount * 0.5) quotas = quotas.map((q) => Math.max(2, Math.floor((q * targetCount * 0.5) / quotaSum)));
+  quotas = quotas.map((q) => Math.min(40, q));
+  const artistTotal = quotas.reduce((s, q) => s + q, 0);
+
+  // Gêneros: dividem o resto na proporção dos pesos.
   const familiarTarget = Math.round(targetCount * FAMILIAR_SHARE[req.taste]);
-  const genreTarget = Math.max(req.genres.length, targetCount - Math.min(targetCount * 0.3, perArtist * wanted.length));
-  const perGenre = Math.ceil(genreTarget / req.genres.length);
+  const genreTarget = Math.max(req.genres.length, targetCount - artistTotal);
+  const mults = req.genres.map((g) => GENRE_MULT[g.weight]);
+  const multSum = mults.reduce((s, m) => s + m, 0);
+  const genreSlots = mults.map((m) => Math.max(1, Math.ceil((genreTarget * m) / multSum)));
 
   const [wantedLists, top] = await Promise.all([
-    wanted.length ? wantedPool(sp, wanted, perArtist) : Promise.resolve([]),
+    wanted.length ? wantedPool(sp, wanted, quotas) : Promise.resolve([]),
     req.taste === 'novo' ? Promise.resolve([] as STrack[]) : topPool(sp),
   ]);
   const pools: Awaited<ReturnType<typeof genrePool>>[] = [];
-  for (const choice of req.genres) pools.push(await genrePool(sp, choice, perGenre));
+  for (const [i, choice] of req.genres.entries()) pools.push(await genrePool(sp, choice, genreSlots[i]));
 
   const usedIds = new Set<string>();
   const usedKeys = new Set<string>();
@@ -215,10 +230,10 @@ export async function buildAndCreate(sp: Spotify, req: MixRequest): Promise<MixR
   // 1. Artistas pedidos primeiro: são garantidos. Vão pro bloco do gênero deles, se tiver.
   const lanes: Lane[] = req.genres.map((g) => ({ key: labelOf(g), tracks: [] }));
   const wantedLane: Lane = { key: 'pedidos', tracks: [] };
-  for (const { tracks } of wantedLists) {
+  for (const { tracks, quota } of wantedLists) {
     let n = 0;
     for (const t of tracks) {
-      if (n >= perArtist) break;
+      if (n >= quota) break;
       if (!take(t)) continue;
       const g = genreOf(t);
       (g >= 0 ? lanes[g] : wantedLane).tracks.push(t);
@@ -228,10 +243,10 @@ export async function buildAndCreate(sp: Spotify, req: MixRequest): Promise<MixR
 
   // 2. Do seu som, só o que é dos gêneros escolhidos: escolher só funk não traz o pop que você ouve.
   const familiar: STrack[][] = pools.map(() => []);
-  const perGenreFamiliar = Math.ceil(familiarTarget / Math.max(1, req.genres.length));
+  const familiarCap = mults.map((m) => Math.ceil((familiarTarget * m) / multSum));
   for (const t of top) {
     const g = genreOf(t);
-    if (g < 0 || familiar[g].length >= perGenreFamiliar) continue;
+    if (g < 0 || familiar[g].length >= familiarCap[g]) continue;
     if (take(t)) familiar[g].push(t);
   }
 
@@ -239,7 +254,7 @@ export async function buildAndCreate(sp: Spotify, req: MixRequest): Promise<MixR
   const known = new Set(top.map((t) => t.id));
   const leftovers: STrack[][] = [];
   pools.forEach((pool, g) => {
-    const room = Math.max(0, perGenre - lanes[g].tracks.length - familiar[g].length);
+    const room = Math.max(0, genreSlots[g] - lanes[g].tracks.length - familiar[g].length);
     const fresh: STrack[] = [];
     const rest: STrack[] = [];
     for (const t of pool.tracks) {

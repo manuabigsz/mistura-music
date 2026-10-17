@@ -9,6 +9,14 @@ import { DEFAULT_THEME, POSTER_THEMES, cssGradient, themeById } from '@/lib/post
 import { joinPt } from '@/lib/text';
 
 type Artist = { id: string; name: string };
+type Weight = 1 | 2 | 3;
+const WEIGHTS: { w: Weight; label: string }[] = [
+  { w: 1, label: 'Pouco' },
+  { w: 2, label: 'Normal' },
+  { w: 3, label: 'Muito' },
+];
+const gKey = (id: string) => `g:${id}`;
+const aKey = (name: string) => `a:${name.toLowerCase()}`;
 type Summary = {
   artists: string[];
   genres: { id: string; label: string }[];
@@ -72,6 +80,7 @@ export default function Mixer() {
   const [picked, setPicked] = useState<string[]>([]);
   const [addText, setAddText] = useState('');
   const [must, setMust] = useState<string[]>([]);
+  const [weights, setWeights] = useState<Record<string, Weight>>({});
   const [mustText, setMustText] = useState('');
   const [me, setMe] = useState<MeState>({ status: 'loading' });
   const [creating, setCreating] = useState(false);
@@ -108,6 +117,11 @@ export default function Mixer() {
       if (Array.isArray(p.must)) setMust(p.must.filter((x): x is string => typeof x === 'string' && !!x.trim()).slice(0, LIMITS.must));
       if (typeof p.vibe === 'string') setVibe(p.vibe.slice(0, LIMITS.vibe));
       setThemeId(themeById(p.theme).id);
+      if (p.weights && typeof p.weights === 'object') {
+        const w: Record<string, Weight> = {};
+        for (const [k, v] of Object.entries(p.weights as Record<string, unknown>)) if (v === 1 || v === 3) w[k] = v;
+        setWeights(w);
+      }
     }
     const h = readJSON(KEY_HIST);
     if (Array.isArray(h)) setHistory(h.filter(isCreated).slice(0, 30));
@@ -115,8 +129,8 @@ export default function Mixer() {
   }, []);
 
   useEffect(() => {
-    if (hydrated) writeJSON(KEY_PREFS, { sel, custom, taste, size: sizeId, must, vibe, theme: themeId });
-  }, [hydrated, sel, custom, taste, sizeId, must, vibe, themeId]);
+    if (hydrated) writeJSON(KEY_PREFS, { sel, custom, taste, size: sizeId, must, vibe, theme: themeId, weights });
+  }, [hydrated, sel, custom, taste, sizeId, must, vibe, themeId, weights]);
 
   useEffect(() => {
     if (hydrated) writeJSON(KEY_HIST, history.slice(0, 30));
@@ -183,7 +197,7 @@ export default function Mixer() {
       : taste === 'novo'
         ? 'Pra descobrir coisa nova'
         : 'Com base no que você ouve';
-  const configKey = JSON.stringify([sel, picked, must, taste, sizeId, vibeText]);
+  const configKey = JSON.stringify([sel, picked, must, taste, sizeId, vibeText, weights]);
   const stampKey = stamp && stamp.config === configKey ? stamp.key : null;
   const count = estimateCount(sizeObj);
   const theme = themeById(themeId);
@@ -213,6 +227,21 @@ export default function Mixer() {
   const shareFile = share && last && share.id === last.id ? share.file : null;
   const canShareFile =
     !!shareFile && typeof navigator !== 'undefined' && !!navigator.canShare && navigator.canShare({ files: [shareFile] });
+
+  const weightOf = (key: string): Weight => weights[key] ?? 2;
+  function setWeight(key: string, w: Weight) {
+    setWeights((all) => {
+      const next = { ...all };
+      if (w === 2) delete next[key];
+      else next[key] = w;
+      return next;
+    });
+  }
+  // Linhas do "quanto de cada": gêneros escolhidos e artistas que têm que entrar.
+  const dosage = [
+    ...sel.map((id, i) => ({ key: gKey(id), label: labels[i], kind: 'Gênero' })),
+    ...posterArtists.map((name) => ({ key: aKey(name), label: name, kind: 'Artista' })),
+  ];
 
   /* ---------- Ações ---------- */
   function toggleGenre(id: string) {
@@ -260,7 +289,15 @@ export default function Mixer() {
       const res = await fetch('/api/playlist', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ genres: sel, picked: pickedArtists, must, taste, size: sizeId, vibe: vibeText }),
+        body: JSON.stringify({
+          genres: sel,
+          genreWeights: Object.fromEntries(sel.map((id) => [id, weightOf(gKey(id))])),
+          picked: pickedArtists.map((a) => ({ ...a, weight: weightOf(aKey(a.name)) })),
+          must: must.map((name) => ({ name, weight: weightOf(aKey(name)) })),
+          taste,
+          size: sizeId,
+          vibe: vibeText,
+        }),
       });
       const data = await res.json().catch(() => null);
       if (!res.ok || typeof data?.id !== 'string') {
@@ -592,9 +629,35 @@ export default function Mixer() {
             </div>
           </section>
 
+          {dosage.length > 1 && (
+            <section className="block" aria-labelledby="h-dose">
+              <h2 id="h-dose">
+                <span className="step">4</span>Quanto de cada <span className="opt">opcional</span>
+              </h2>
+              <p className="hint">“Muito” aparece umas quatro vezes mais que “Pouco” na playlist.</p>
+              <ul className="dose">
+                {dosage.map((d) => (
+                  <li key={d.key}>
+                    <span className="dose-name">
+                      {d.label}
+                      <span className="dose-kind">{d.kind}</span>
+                    </span>
+                    <span className="seg dose-seg" role="group" aria-label={`Quanto de ${d.label}`}>
+                      {WEIGHTS.map(({ w, label }) => (
+                        <button key={w} type="button" aria-pressed={weightOf(d.key) === w} onClick={() => setWeight(d.key, w)}>
+                          {label}
+                        </button>
+                      ))}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
           <section className="block" aria-labelledby="h-dur">
             <h2 id="h-dur">
-              <span className="step">4</span>Tamanho
+              <span className="step">5</span>Tamanho
             </h2>
             <div className="chips" role="group" aria-labelledby="h-dur">
               {SIZES.map((s) => (
@@ -619,7 +682,7 @@ export default function Mixer() {
 
           <section className="block" aria-labelledby="h-vibe">
             <h2 id="h-vibe">
-              <span className="step">5</span>Pra quê? <span className="opt">opcional</span>
+              <span className="step">6</span>Pra quê? <span className="opt">opcional</span>
             </h2>
             <p className="hint">Vira o nome da playlist.</p>
             <input
