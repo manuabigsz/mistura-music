@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import Poster from './Poster';
-import { CUSTOM_PREFIX, DEFAULT_GENRES, GENRES, genreLabel } from '@/lib/genres';
-import { DURATIONS, LIMITS, TASTES, estimateCount, type Taste } from '@/lib/options';
+import { CUSTOM_PREFIX, DEFAULT_GENRES, GENRES, genreLabel, parseGenreText } from '@/lib/genres';
+import { DEFAULT_SIZE, LIMITS, SIZES, TASTES, estimateCount, sizeById, type Taste } from '@/lib/options';
 import { renderCover, renderPoster } from '@/lib/poster-image';
 import { DEFAULT_THEME, POSTER_THEMES, cssGradient, themeById } from '@/lib/poster-themes';
 import { joinPt } from '@/lib/text';
@@ -61,11 +61,13 @@ export default function Mixer() {
   const [sel, setSel] = useState<string[]>(DEFAULT_GENRES);
   const [custom, setCustom] = useState<string[]>([]);
   const [taste, setTaste] = useState<Taste>('equilibrado');
-  const [duration, setDuration] = useState(0);
+  const [sizeId, setSizeId] = useState(DEFAULT_SIZE.id);
   const [vibe, setVibe] = useState('');
   const [themeId, setThemeId] = useState(DEFAULT_THEME.id);
   const [picked, setPicked] = useState<string[]>([]);
   const [addText, setAddText] = useState('');
+  const [must, setMust] = useState<string[]>([]);
+  const [mustText, setMustText] = useState('');
   const [me, setMe] = useState<MeState>({ status: 'loading' });
   const [creating, setCreating] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
@@ -97,7 +99,8 @@ export default function Mixer() {
       setCustom(cust);
       if (Array.isArray(p.sel)) setSel(p.sel.filter((x): x is string => typeof x === 'string' && valid.has(x)));
       if (TASTES.some((t) => t.id === p.taste)) setTaste(p.taste as Taste);
-      if (DURATIONS.some((d) => d.min === p.duration)) setDuration(p.duration as number);
+      setSizeId(sizeById(p.size).id);
+      if (Array.isArray(p.must)) setMust(p.must.filter((x): x is string => typeof x === 'string' && !!x.trim()).slice(0, LIMITS.must));
       if (typeof p.vibe === 'string') setVibe(p.vibe.slice(0, LIMITS.vibe));
       setThemeId(themeById(p.theme).id);
     }
@@ -107,8 +110,8 @@ export default function Mixer() {
   }, []);
 
   useEffect(() => {
-    if (hydrated) writeJSON(KEY_PREFS, { sel, custom, taste, duration, vibe, theme: themeId });
-  }, [hydrated, sel, custom, taste, duration, vibe, themeId]);
+    if (hydrated) writeJSON(KEY_PREFS, { sel, custom, taste, size: sizeId, must, vibe, theme: themeId });
+  }, [hydrated, sel, custom, taste, sizeId, must, vibe, themeId]);
 
   useEffect(() => {
     if (hydrated) writeJSON(KEY_HIST, history.slice(0, 30));
@@ -153,21 +156,25 @@ export default function Mixer() {
   const pickedArtists = picked.map((id) => artists.find((a) => a.id === id)).filter((a): a is Artist => !!a);
   const labels = sel.map(genreLabel);
   const tasteObj = TASTES.find((t) => t.id === taste) ?? TASTES[1];
-  const durObj = DURATIONS.find((d) => d.min === duration) ?? DURATIONS[0];
+  const sizeObj = sizeById(sizeId);
+  const posterArtists = [
+    ...pickedArtists.map((a) => a.name),
+    ...must.filter((m) => !pickedArtists.some((a) => a.name.toLowerCase() === m.toLowerCase())),
+  ];
   const vibeText = vibe.trim();
   const vibeLabel = vibeText ? (/^(pra|para|pro)\s/i.test(vibeText) ? vibeText : `Pra ${vibeText}`) : '';
-  const foot = [durObj.poster, tasteObj.poster, vibeLabel].filter(Boolean);
+  const foot = [sizeObj.poster, tasteObj.poster, vibeLabel].filter(Boolean);
   const base =
-    pickedArtists.length > 0
+    posterArtists.length > 0
       ? taste === 'novo'
         ? 'Pra descobrir, sem faltar'
         : 'Com base no que você ouve, sem faltar'
       : taste === 'novo'
         ? 'Pra descobrir coisa nova'
         : 'Com base no que você ouve';
-  const configKey = JSON.stringify([sel, picked, taste, duration, vibeText]);
+  const configKey = JSON.stringify([sel, picked, must, taste, sizeId, vibeText]);
   const stampKey = stamp && stamp.config === configKey ? stamp.key : null;
-  const count = estimateCount(duration);
+  const count = estimateCount(sizeObj);
   const theme = themeById(themeId);
 
   // Prepara a imagem do cartaz assim que a playlist fica pronta: no iPhone o
@@ -201,16 +208,31 @@ export default function Mixer() {
     setSel((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
   }
 
+  /** Aceita uma frase inteira: "pop com rock pesado, indie" vira três gêneros. */
   function addGenre(e: FormEvent) {
     e.preventDefault();
-    const label = addText.replace(/\s+/g, ' ').trim().slice(0, LIMITS.label);
-    if (!label) return;
-    const found = GENRES.find((g) => g.label.toLowerCase() === label.toLowerCase());
-    const existing = custom.find((c) => c.toLowerCase() === label.toLowerCase());
-    const id = found ? found.id : CUSTOM_PREFIX + (existing ?? label);
-    if (!found && !existing) setCustom((c) => [...c, label].slice(-20));
-    setSel((s) => (s.includes(id) ? s : [...s, id]));
+    const { known, custom: typed } = parseGenreText(addText.slice(0, 200));
+    if (!known.length && !typed.length) return;
+    const names = typed.map((t) => t.slice(0, LIMITS.label));
+    const ids = [
+      ...known,
+      ...names.map((n) => CUSTOM_PREFIX + (custom.find((c) => c.toLowerCase() === n.toLowerCase()) ?? n)),
+    ];
+    setCustom((c) => [...c, ...names.filter((n) => !c.some((x) => x.toLowerCase() === n.toLowerCase()))].slice(-20));
+    setSel((s) => [...s, ...ids.filter((id) => !s.includes(id))]);
     setAddText('');
+  }
+
+  /** Artistas digitados que têm que entrar. Aceita vários separados por vírgula. */
+  function addMust(e: FormEvent) {
+    e.preventDefault();
+    const names = mustText
+      .split(/[,;]/)
+      .map((n) => n.replace(/\s+/g, ' ').trim().slice(0, 60))
+      .filter(Boolean);
+    if (!names.length) return;
+    setMust((m) => [...m, ...names.filter((n) => !m.some((x) => x.toLowerCase() === n.toLowerCase()))].slice(0, LIMITS.must));
+    setMustText('');
   }
 
   function toggleArtist(id: string) {
@@ -222,12 +244,12 @@ export default function Mixer() {
     setCreating(true);
     setNotice(null);
     const config = configKey;
-    const snapshot = { genres: labels, artists: pickedArtists.map((a) => a.name), foot, base, theme: themeId };
+    const snapshot = { genres: labels, artists: posterArtists, foot, base, theme: themeId };
     try {
       const res = await fetch('/api/playlist', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ genres: sel, picked: pickedArtists, taste, duration, vibe: vibeText }),
+        body: JSON.stringify({ genres: sel, picked: pickedArtists, must, taste, size: sizeId, vibe: vibeText }),
       });
       const data = await res.json().catch(() => null);
       if (!res.ok || typeof data?.id !== 'string') {
@@ -406,14 +428,14 @@ export default function Mixer() {
               })}
             </div>
             <form className="addrow" onSubmit={addGenre} autoComplete="off">
-              <label className="sr" htmlFor="add-genre">
-                Outro gênero
+              <label className="hint addlabel" htmlFor="add-genre">
+                Ou escreva do seu jeito, tipo “pop com rock pesado, indie e um pouco de lo-fi”.
               </label>
               <input
                 id="add-genre"
                 className="field"
-                maxLength={LIMITS.label}
-                placeholder="Outro gênero, tipo piseiro"
+                maxLength={200}
+                placeholder="pop com rock pesado, indie…"
                 value={addText}
                 onChange={(e) => setAddText(e.target.value)}
                 enterKeyHint="done"
@@ -441,15 +463,53 @@ export default function Mixer() {
           <section className="block" aria-labelledby="h-artists">
             <h2 id="h-artists">
               <span className="step">3</span>Artistas que não podem faltar{' '}
-              {pickedArtists.length > 0 ? (
+              {posterArtists.length > 0 ? (
                 <span className="count">
-                  {pickedArtists.length === 1 ? '1 escolhido' : `${pickedArtists.length} escolhidos`}
+                  {posterArtists.length === 1 ? '1 escolhido' : `${posterArtists.length} escolhidos`}
                 </span>
               ) : (
                 <span className="opt">opcional</span>
               )}
             </h2>
-            <p className="hint">Seus mais ouvidos. Os que você marcar entram com certeza, mesmo fora dos gêneros.</p>
+            <p className="hint">Os que você marcar ou escrever entram com certeza, com várias músicas cada.</p>
+            <form className="addrow must-row" onSubmit={addMust} autoComplete="off">
+              <label className="sr" htmlFor="add-must">
+                Artista que tem que ter
+              </label>
+              <input
+                id="add-must"
+                className="field"
+                maxLength={300}
+                placeholder="Qualquer artista: Linkin Park, Pitty…"
+                value={mustText}
+                onChange={(e) => setMustText(e.target.value)}
+                enterKeyHint="done"
+                disabled={must.length >= LIMITS.must}
+              />
+              <button className="ghost" type="submit" disabled={!mustText.trim() || must.length >= LIMITS.must}>
+                Adicionar
+              </button>
+            </form>
+            {must.length > 0 && (
+              <div className="chips must-chips" role="group" aria-label="Artistas que você escreveu">
+                {must.map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    className="chip"
+                    aria-pressed="true"
+                    aria-label={`Tirar ${m}`}
+                    onClick={() => setMust((list) => list.filter((x) => x !== m))}
+                  >
+                    {m}
+                    <span className="tick" aria-hidden="true">
+                      ×
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+            <p className="hint sub">Ou toque nos seus mais ouvidos:</p>
             <div aria-live="polite">
               {me.status === 'loading' && <p className="hint">Buscando seus artistas mais ouvidos…</p>}
               {me.status === 'error' && (
@@ -494,15 +554,27 @@ export default function Mixer() {
 
           <section className="block" aria-labelledby="h-dur">
             <h2 id="h-dur">
-              <span className="step">4</span>Duração
+              <span className="step">4</span>Tamanho
             </h2>
-            <div className="seg" role="group" aria-labelledby="h-dur">
-              {DURATIONS.map((d) => (
-                <button key={d.min} type="button" aria-pressed={d.min === duration} onClick={() => setDuration(d.min)}>
-                  {d.label}
+            <div className="chips" role="group" aria-labelledby="h-dur">
+              {SIZES.map((s) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  className="chip"
+                  aria-pressed={s.id === sizeId}
+                  onClick={() => setSizeId(s.id)}
+                >
+                  {s.id === sizeId && (
+                    <span className="tick" aria-hidden="true">
+                      ✓
+                    </span>
+                  )}
+                  {s.label}
                 </button>
               ))}
             </div>
+            {count >= 100 && <p className="hint after">Playlists grandes levam uns 20 a 40 segundos pra montar.</p>}
           </section>
 
           <section className="block" aria-labelledby="h-vibe">
@@ -526,7 +598,7 @@ export default function Mixer() {
         <aside className="stage" aria-label="Prévia e criação">
           <Poster
             genres={labels}
-            artists={pickedArtists.map((a) => a.name)}
+            artists={posterArtists}
             foot={foot}
             base={base}
             theme={theme}

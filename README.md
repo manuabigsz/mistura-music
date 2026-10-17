@@ -33,8 +33,8 @@ Em fevereiro de 2026 o Spotify fechou boa parte da Web API para apps em modo de 
 
 1. **Seu som**: pega suas músicas mais ouvidas (últimas semanas e últimos meses), o que tocou por último e, se você marcou artistas, busca músicas deles.
 2. **Gêneros**: cada gênero tem uma lista de artistas de referência em `lib/genres.ts`. O app sorteia alguns, busca as músicas deles (o flashback ainda filtra por ano, 1978 a 1999) e dá preferência a artistas de cada gênero que já aparecem no que você ouve.
-3. **Proporção**: “Mais do que eu curto” usa cerca de 60% do seu som, “Equilibrado” 30% e “Só descobertas” nada (ajuste em `lib/options.ts`). Do seu som só entram músicas de artistas dos gêneros escolhidos, mais os artistas que você marcar.
-4. **Ordem**: as faixas são intercaladas mantendo a proporção ao longo da playlist e evitando o mesmo artista duas vezes seguidas. Versões repetidas da mesma música (ao vivo, remaster) ficam de fora.
+3. **Proporção**: “Mais do que eu curto” usa cerca de 60% do seu som, “Equilibrado” 30% e “Só descobertas” nada (ajuste em `lib/options.ts`). Do seu som só entram músicas de artistas dos gêneros escolhidos. Artistas marcados ou digitados têm cota garantida (até 30% da playlist).
+4. **Ordem**: as faixas vão em blocos de 3 a 5 músicas do mesmo gênero, mantendo a proporção ao longo da playlist e evitando o mesmo artista duas vezes seguidas. Versões repetidas da mesma música (ao vivo, remaster) ficam de fora.
 5. **Criação**: a playlist é criada como privada na sua conta, com `POST /me/playlists` e `POST /playlists/{id}/items`, os endpoints atuais.
 
 Gêneros digitados na hora (tipo “piseiro”) não têm artistas de referência, então usam uma busca por texto e podem vir menos precisos. Pra deixar um gênero bom de verdade, adicione ele em `lib/genres.ts` com uns 10 artistas.

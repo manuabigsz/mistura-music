@@ -685,3 +685,20 @@ body {
 .cover-row .meta {
   margin: 0;
 }
+.addlabel {
+  flex-basis: 100%;
+  margin: 0;
+}
+.addrow {
+  flex-wrap: wrap;
+}
+.must-row {
+  margin: 0 0 12px;
+}
+.must-chips {
+  margin-bottom: 14px;
+}
+.hint.sub {
+  margin: 4px 0 10px;
+  font-size: 14px;
+}

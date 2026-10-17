@@ -31,25 +31,33 @@ export const FAMILIAR_SHARE: Record<Taste, number> = {
   novo: 0,
 };
 
-export const DURATIONS: { min: number; label: string; poster: string }[] = [
-  { min: 0, label: 'Livre', poster: 'Cerca de 40 músicas' },
-  { min: 30, label: '30 min', poster: '30 minutos' },
-  { min: 60, label: '1 h', poster: '1 hora' },
-  { min: 120, label: '2 h', poster: '2 horas' },
-  { min: 180, label: '3 h', poster: '3 horas' },
-];
+/** Tamanho da playlist: por número de músicas ou por tempo. */
+export type Size = { id: string; label: string; poster: string; tracks?: number; minutes?: number };
 
-export const DEFAULT_TRACKS = 40;
+export const SIZES: Size[] = [
+  { id: '40', label: '40 músicas', poster: '40 músicas', tracks: 40 },
+  { id: '30m', label: '30 min', poster: '30 minutos', minutes: 30 },
+  { id: '1h', label: '1 h', poster: '1 hora', minutes: 60 },
+  { id: '2h', label: '2 h', poster: '2 horas', minutes: 120 },
+  { id: '3h', label: '3 h', poster: '3 horas', minutes: 180 },
+  { id: '100', label: '100 músicas', poster: '100 músicas', tracks: 100 },
+  { id: '200', label: '200 músicas', poster: '200 músicas', tracks: 200 },
+];
+export const DEFAULT_SIZE = SIZES[0];
+export const sizeById = (id: unknown) => SIZES.find((s) => s.id === id) ?? DEFAULT_SIZE;
+
 export const AVG_TRACK_MS = 210_000;
 
 export const LIMITS = {
-  customGenres: 5,
+  customGenres: 8,
   label: 40,
   picked: 8,
+  /** Artistas digitados que têm que entrar. */
+  must: 10,
   vibe: 60,
 };
 
 /** Quantas músicas a playlist deve ter, aproximadamente. */
-export function estimateCount(durationMin: number): number {
-  return durationMin > 0 ? Math.min(150, Math.ceil((durationMin * 60_000) / AVG_TRACK_MS)) : DEFAULT_TRACKS;
+export function estimateCount(size: Size): number {
+  return size.tracks ?? Math.min(200, Math.ceil(((size.minutes ?? 0) * 60_000) / AVG_TRACK_MS));
 }

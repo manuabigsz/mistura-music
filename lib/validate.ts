@@ -1,6 +1,6 @@
 import { CUSTOM_PREFIX, genreById } from './genres';
 import type { GenreChoice, MixRequest } from './mix';
-import { DURATIONS, LIMITS, TASTES, type Taste } from './options';
+import { LIMITS, TASTES, sizeById, type Taste } from './options';
 import { clean, norm } from './text';
 
 const ARTIST_ID = /^[0-9A-Za-z]{22}$/;
@@ -40,9 +40,16 @@ export function parseMixRequest(body: unknown): MixRequest | string {
     picked.push({ id, name: clean(name) });
   }
 
+  const must: string[] = [];
+  for (const raw of Array.isArray(b.must) ? b.must.slice(0, LIMITS.must) : []) {
+    if (typeof raw !== 'string') continue;
+    const name = clean(raw, 60);
+    if (name && !must.some((m) => norm(m) === norm(name))) must.push(name);
+  }
+
   const taste: Taste = TASTES.some((t) => t.id === b.taste) ? (b.taste as Taste) : 'equilibrado';
-  const duration = DURATIONS.some((d) => d.min === b.duration) ? (b.duration as number) : 0;
+  const size = sizeById(b.size);
   const vibe = typeof b.vibe === 'string' ? clean(b.vibe, LIMITS.vibe) : '';
 
-  return { genres, picked, taste, duration, vibe };
+  return { genres, picked, must, taste, size, vibe };
 }

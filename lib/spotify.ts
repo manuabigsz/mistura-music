@@ -222,10 +222,10 @@ export class Spotify {
   }
 
   /** A busca devolve no máximo 10 resultados por página desde 2026. */
-  async searchTracks(q: string): Promise<STrack[]> {
+  async searchTracks(q: string, offset = 0): Promise<STrack[]> {
     const run = (market?: string) =>
       this.call<{ tracks?: { items?: unknown[] } }>('GET', '/search', {
-        query: { q, type: 'track', limit: 10, market },
+        query: { q, type: 'track', limit: 10, offset: offset || undefined, market },
       });
     let r;
     try {
