@@ -702,3 +702,33 @@ body {
   margin: 4px 0 10px;
   font-size: 14px;
 }
+
+/* Resumo da conta */
+.summary {
+  width: calc(100% - 40px);
+  max-width: 1060px;
+  margin: 20px auto 0;
+  padding: 16px 18px 18px;
+  border: 2px solid var(--ink);
+  border-left: 8px solid var(--hot);
+}
+.sum-kicker {
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--soft);
+}
+.sum-line {
+  margin: 0 0 4px;
+  font-size: 17px;
+  max-width: 70ch;
+}
+.sum-line.soft {
+  color: var(--soft);
+  font-size: 15px;
+}
+.summary .btn {
+  margin-top: 12px;
+}

@@ -9,6 +9,11 @@ import { DEFAULT_THEME, POSTER_THEMES, cssGradient, themeById } from '@/lib/post
 import { joinPt } from '@/lib/text';
 
 type Artist = { id: string; name: string };
+type Summary = {
+  artists: string[];
+  genres: { id: string; label: string }[];
+  track: { name: string; artist: string } | null;
+};
 type Created = {
   id: string;
   name: string;
@@ -25,7 +30,7 @@ type Created = {
 };
 type MeState =
   | { status: 'loading' }
-  | { status: 'ready'; name: string | null; email: string | null; artists: Artist[] }
+  | { status: 'ready'; name: string | null; email: string | null; artists: Artist[]; summary: Summary | null }
   | { status: 'error'; message: string; relogin: boolean; name: string | null; email: string | null };
 type Notice = { text: string; relogin?: boolean; url?: string | null } | null;
 
@@ -141,7 +146,13 @@ export default function Mixer() {
         });
         return;
       }
-      setMe({ status: 'ready', name: data?.name ?? null, email: data?.email ?? null, artists: Array.isArray(data?.artists) ? data.artists : [] });
+      setMe({
+        status: 'ready',
+        name: data?.name ?? null,
+        email: data?.email ?? null,
+        artists: Array.isArray(data?.artists) ? data.artists : [],
+        summary: data?.summary && Array.isArray(data.summary.artists) && Array.isArray(data.summary.genres) ? data.summary : null,
+      });
     } catch {
       setMe({ status: 'error', message: 'Não deu pra falar com o servidor. Confira sua conexão.', relogin: false, name: null, email: null });
     }
@@ -397,6 +408,35 @@ export default function Mixer() {
           </button>
         </form>
       </header>
+
+      {me.status === 'ready' && me.summary && me.summary.artists.length > 0 && (
+        <section className="summary" aria-label="Resumo do que você ouve">
+          <p className="sum-kicker">Seu som ultimamente</p>
+          <p className="sum-line">
+            Você escuta muito <strong>{joinPt(me.summary.artists)}</strong>.
+          </p>
+          {me.summary.genres.length > 0 && (
+            <p className="sum-line">
+              Seu gosto puxa pra <strong>{joinPt(me.summary.genres.map((g) => g.label))}</strong>.
+            </p>
+          )}
+          {me.summary.track && (
+            <p className="sum-line soft">
+              Mais tocada nas últimas semanas: <strong>{me.summary.track.name}</strong>, de {me.summary.track.artist}.
+            </p>
+          )}
+          {me.summary.genres.length > 0 && (
+            <button
+              type="button"
+              className="btn"
+              onClick={() => setSel(me.summary!.genres.map((g) => g.id))}
+              disabled={me.summary.genres.every((g, i) => sel[i] === g.id) && sel.length === me.summary.genres.length}
+            >
+              Montar com esses gêneros
+            </button>
+          )}
+        </section>
+      )}
 
       <main className="layout">
         <div className="controls">
